@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aster Stella - 管理者ページ</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Aster Stella</h1>
+    <p class="subtitle">ステッラシステム / 管理者ページ</p>
+    <nav class="nav">
+      <a href="index.html">接続関係エディタ</a>
+      <a href="admin.html" class="active">管理者ページ</a>
+      <a href="nations.html">国家管理</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="map-section">
+      <div class="map-wrap">
+        <div id="map-container" class="map-container">
+          <p class="loading">地図を読み込み中...</p>
+        </div>
+        <div class="zoom-controls" aria-label="地図ズーム">
+          <button id="btn-zoom-in" type="button" class="zoom-btn" aria-label="拡大">+</button>
+          <button id="btn-zoom-out" type="button" class="zoom-btn" aria-label="縮小">&minus;</button>
+          <button id="btn-zoom-reset" type="button" class="zoom-btn zoom-reset" aria-label="リセット">リセット</button>
+        </div>
+      </div>
+      <div class="map-tools">
+        <label>表示モード
+          <select id="display-mode"></select>
+        </label>
+        <p id="map-status" class="status"></p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>選択中のステート: <span id="selected-name">（未選択）</span></h2>
+      <div id="state-form" class="state-form">
+        <p class="loading">地図のステートをタップしてください。</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>ランダム配置</h2>
+      <div class="controls">
+        <label>油田スポット数
+          <input type="number" id="oil-spot-count" value="3" min="0" step="1">
+        </label>
+        <label>その他の沸き確率 (%)
+          <input type="number" id="oil-low-prob" value="5" min="0" max="100" step="0.5">
+        </label>
+      </div>
+      <div class="buttons">
+        <button id="btn-random" type="button">資源をランダム配置</button>
+      </div>
+      <p id="random-status" class="status"></p>
+    </section>
+
+    <section class="panel">
+      <h2>データ管理</h2>
+      <div class="buttons">
+        <button id="btn-fb-save" type="button">Firebaseに全保存</button>
+        <button id="btn-fb-load" type="button" class="secondary">Firebaseから全読込</button>
+        <button id="btn-download" type="button" class="secondary">JSONダウンロード</button>
+        <button id="btn-reset-all" type="button" class="secondary">全データを初期化</button>
+      </div>
+      <p id="fb-status" class="status"></p>
+    </section>
+
+    <section class="panel note">
+      <h2>説明</h2>
+      <ul>
+        <li>地図のステートをタップすると、画面下のフォームでそのステータスを編集できる。</li>
+        <li>入力値は即座にメモリ上の状態に反映される（Firebaseへの保存はボタン操作時のみ）。</li>
+        <li>「資源をランダム配置」を押すと、肥沃度・金属・石油・石炭・重要鉱物資源を仕様どおり再配置する。</li>
+        <li>「表示モード」で選んだ指標を地図上に色（薄い→濃い）で表示する。</li>
+        <li>所属国家は文字列で入力する（国家データは未確定のため）。</li>
+      </ul>
+    </section>
+  </main>
+
+  <script type="module" src="js/admin.js"></script>
+</body>
+</html>

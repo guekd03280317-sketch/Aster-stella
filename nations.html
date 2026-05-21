@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aster Stella - 国家管理</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Aster Stella</h1>
+    <p class="subtitle">ステッラシステム / 国家管理</p>
+    <nav class="nav">
+      <a href="index.html">接続関係エディタ</a>
+      <a href="admin.html">管理者ページ</a>
+      <a href="nations.html" class="active">国家管理</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="map-section">
+      <div class="map-wrap">
+        <div id="map-container" class="map-container">
+          <p class="loading">地図を読み込み中...</p>
+        </div>
+        <div class="zoom-controls" aria-label="地図ズーム">
+          <button id="btn-zoom-in" type="button" class="zoom-btn" aria-label="拡大">+</button>
+          <button id="btn-zoom-out" type="button" class="zoom-btn" aria-label="縮小">&minus;</button>
+          <button id="btn-zoom-reset" type="button" class="zoom-btn zoom-reset" aria-label="リセット">リセット</button>
+        </div>
+      </div>
+      <div class="map-tools">
+        <label>クリック動作
+          <select id="click-mode">
+            <option value="select">情報表示（タップで内容を見る）</option>
+            <option value="assign">建国モード（選択中の国家にステートを編入）</option>
+            <option value="release">編入解除（タップで未所属に戻す）</option>
+            <option value="capital">首都指定（選択中の国家の首都にする）</option>
+          </select>
+        </label>
+        <p id="map-status" class="status"></p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>国家一覧</h2>
+      <div class="buttons">
+        <button id="btn-new-nation" type="button">新規建国</button>
+        <button id="btn-delete-nation" type="button" class="secondary">選択中の国家を削除</button>
+      </div>
+      <div id="nation-list" class="nation-list">
+        <p class="loading">まだ国家がありません。「新規建国」で作成してください。</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>選択中の国家: <span id="selected-nation-name">（未選択）</span></h2>
+      <div id="nation-form" class="state-form">
+        <p class="loading">左の国家一覧から選択するか、「新規建国」で作成してください。</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>データ管理</h2>
+      <div class="buttons">
+        <button id="btn-fb-save" type="button">Firebaseに保存</button>
+        <button id="btn-fb-load" type="button" class="secondary">Firebaseから読込</button>
+        <button id="btn-download" type="button" class="secondary">JSONダウンロード</button>
+      </div>
+      <p id="fb-status" class="status"></p>
+    </section>
+
+    <section class="panel note">
+      <h2>使い方</h2>
+      <ol>
+        <li>「新規建国」で国家を作成し、フォームで国名・色・イデオロギーなどを入力する。</li>
+        <li>「クリック動作」を「建国モード」にして地図のステートをタップすると、選択中の国家に編入される。</li>
+        <li>「編入解除」モードで未所属に戻せる。「首都指定」で選択中の国家の首都を設定する。</li>
+        <li>地図はその国家の色で塗られる。所属国家は管理者ページの編集にも反映される。</li>
+        <li>「Firebaseに保存」で国家データとステート所属を一括保存する。</li>
+      </ol>
+    </section>
+  </main>
+
+  <script type="module" src="js/nations.js"></script>
+</body>
+</html>

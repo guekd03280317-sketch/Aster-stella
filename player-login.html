@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aster Stella - ログイン</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Aster Stella</h1>
+    <p class="subtitle">playerサイド / ログイン</p>
+  </header>
+
+  <main>
+    <section class="panel login-panel">
+      <h2>自国にログイン</h2>
+      <p class="login-desc">自分の国家を選び、管理者から渡されたパスワードを入力してください。</p>
+
+      <label class="field login-field">
+        <span>国家</span>
+        <div id="nation-choices" class="nation-list">
+          <p class="loading">国家を読み込み中...</p>
+        </div>
+      </label>
+
+      <label class="field login-field">
+        <span>パスワード</span>
+        <div class="field-row">
+          <input type="password" id="password" autocomplete="current-password" placeholder="パスワード" inputmode="text">
+          <button type="button" id="btn-toggle-pw" class="field-toggle">表示</button>
+        </div>
+      </label>
+
+      <div class="buttons">
+        <button type="button" id="btn-login">ログイン</button>
+      </div>
+      <p id="login-status" class="status"></p>
+    </section>
+  </main>
+
+  <script type="module" src="js/player-login.js"></script>
+</body>
+</html>

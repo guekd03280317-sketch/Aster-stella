@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aster Stella - 地図接続エディタ</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Aster Stella</h1>
+    <p class="subtitle">ステッラシステム / 地図接続エディタ</p>
+    <nav class="nav">
+      <a href="index.html" class="active">接続関係エディタ</a>
+      <a href="admin.html">管理者ページ</a>
+      <a href="nations.html">国家管理</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="map-section">
+      <div class="map-wrap">
+        <div id="map-container" class="map-container">
+          <p class="loading">地図を読み込み中...</p>
+        </div>
+        <div class="zoom-controls" aria-label="地図ズーム">
+          <button id="btn-zoom-in" type="button" class="zoom-btn" aria-label="拡大">+</button>
+          <button id="btn-zoom-out" type="button" class="zoom-btn" aria-label="縮小">&minus;</button>
+          <button id="btn-zoom-reset" type="button" class="zoom-btn zoom-reset" aria-label="リセット">リセット</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>接続関係の生成</h2>
+      <div class="controls">
+        <label>判定距離 (threshold)
+          <input type="number" id="threshold" value="1.5" min="0.1" step="0.1">
+        </label>
+        <label>サンプル間隔 (step)
+          <input type="number" id="sampleStep" value="1" min="0.1" step="0.1">
+        </label>
+      </div>
+      <div class="buttons">
+        <button id="btn-generate" type="button">接続関係をJSONにする</button>
+        <button id="btn-reset-colors" type="button" class="secondary">地図の色をリセット</button>
+      </div>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section class="panel">
+      <h2>JSONデータ</h2>
+      <textarea id="json-output" spellcheck="false" placeholder="ここに接続関係のJSONが表示されます"></textarea>
+      <div class="buttons">
+        <button id="btn-download" type="button">JSONをダウンロード</button>
+        <button id="btn-save" type="button">Firebaseに保存</button>
+        <button id="btn-load" type="button" class="secondary">Firebaseから読込</button>
+      </div>
+      <p id="fb-status" class="status"></p>
+    </section>
+
+    <section class="panel note">
+      <h2>使い方</h2>
+      <ol>
+        <li>「接続関係をJSONにする」を押すと、地図の各ステートの隣接関係を計算します。</li>
+        <li>地図のステートをタップすると、そのステートと隣接ステートが色分け表示されます。</li>
+        <li>必要に応じてJSONを手で編集できます（海をまたぐ接続など）。</li>
+        <li>「Firebaseに保存」で Realtime Database の aster_stella/map に保存します。</li>
+      </ol>
+    </section>
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

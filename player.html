@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aster Stella - playerサイド</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Aster Stella</h1>
+    <p class="subtitle">playerサイド / <span id="hdr-nation">読み込み中...</span></p>
+  </header>
+
+  <nav class="tabbar" id="tabbar" aria-label="メニュー">
+    <button type="button" class="tab-btn active" data-tab="dashboard">ダッシュボード</button>
+    <button type="button" class="tab-btn" data-tab="map">地図</button>
+    <button type="button" class="tab-btn" data-tab="domestic">内政</button>
+    <button type="button" class="tab-btn" data-tab="industry">産業</button>
+    <button type="button" class="tab-btn" data-tab="economy">経済 / 貿易</button>
+    <button type="button" class="tab-btn" data-tab="research">研究</button>
+    <button type="button" class="tab-btn" data-tab="diplomacy">外交</button>
+    <button type="button" class="tab-btn" data-tab="settings">設定</button>
+  </nav>
+
+  <main>
+    <!-- ダッシュボード -->
+    <section class="tab-panel active" data-tab="dashboard">
+      <div class="panel">
+        <h2>国家概要</h2>
+        <div id="dash-overview" class="field-grid"></div>
+      </div>
+      <div class="panel">
+        <h2>主要ステータス</h2>
+        <div id="dash-stats" class="field-grid"></div>
+      </div>
+      <div class="panel">
+        <h2>自国の位置</h2>
+        <div class="map-wrap">
+          <div id="mini-map" class="map-container mini"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>最近の出来事</h2>
+        <div id="dash-logs" class="log-list">
+          <p class="loading">まだ記録がありません。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 地図 -->
+    <section class="tab-panel" data-tab="map">
+      <div class="panel map-section">
+        <div class="map-wrap">
+          <div id="map-container" class="map-container">
+            <p class="loading">地図を読み込み中...</p>
+          </div>
+          <div class="zoom-controls" aria-label="地図ズーム">
+            <button id="btn-zoom-in" type="button" class="zoom-btn" aria-label="拡大">+</button>
+            <button id="btn-zoom-out" type="button" class="zoom-btn" aria-label="縮小">&minus;</button>
+            <button id="btn-zoom-reset" type="button" class="zoom-btn zoom-reset" aria-label="リセット">リセット</button>
+          </div>
+        </div>
+        <div class="map-tools">
+          <label>表示モード
+            <select id="display-mode"></select>
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="highlight-own"> 自国領のみハイライト
+          </label>
+          <p id="map-status" class="status"></p>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>ステート情報</h2>
+        <div id="state-info">
+          <p class="loading">地図のステートをタップすると基本情報を表示します（読み取り専用）。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 内政 -->
+    <section class="tab-panel" data-tab="domestic">
+      <div class="panel">
+        <h2>税率</h2>
+        <div id="tax-control"></div>
+      </div>
+      <div class="panel">
+        <h2>投資（ステート単位）</h2>
+        <div id="invest-control"></div>
+      </div>
+      <div class="panel">
+        <h2>予備兵の徴兵</h2>
+        <div id="conscript-control"></div>
+      </div>
+      <div class="panel">
+        <h2>予約中の操作</h2>
+        <div id="domestic-orders" class="order-list"></div>
+      </div>
+    </section>
+
+    <!-- 産業 -->
+    <section class="tab-panel" data-tab="industry">
+      <div class="panel">
+        <h2>産業の建設 / 解体</h2>
+        <div id="industry-control"></div>
+      </div>
+      <div class="panel">
+        <h2>自国の産業設置数</h2>
+        <div id="industry-summary"></div>
+      </div>
+      <div class="panel">
+        <h2>予約中の操作</h2>
+        <div id="industry-orders" class="order-list"></div>
+      </div>
+    </section>
+
+    <!-- 経済/貿易 -->
+    <section class="tab-panel" data-tab="economy">
+      <div class="panel">
+        <h2>景気</h2>
+        <div id="economy-trend"></div>
+      </div>
+      <div class="panel">
+        <h2>資源の産出 / 消費 / 余剰（試算）</h2>
+        <div id="economy-balance"></div>
+      </div>
+      <div class="panel">
+        <h2>市場（相対取引）</h2>
+        <div id="market-control"></div>
+      </div>
+      <div class="panel">
+        <h2>予約中の操作</h2>
+        <div id="economy-orders" class="order-list"></div>
+      </div>
+    </section>
+
+    <!-- 研究 -->
+    <section class="tab-panel" data-tab="research">
+      <div class="panel">
+        <h2>研究</h2>
+        <div id="research-control"></div>
+      </div>
+      <div class="panel">
+        <h2>情報レポート</h2>
+        <div id="research-report"></div>
+      </div>
+      <div class="panel">
+        <h2>予約中の操作</h2>
+        <div id="research-orders" class="order-list"></div>
+      </div>
+    </section>
+    <!-- 外交 -->
+    <section class="tab-panel" data-tab="diplomacy">
+      <div class="panel"><h2>外交</h2><p class="loading">このタブは後で実装します（NPC国家の追加後）。</p></div>
+    </section>
+
+    <!-- 設定 -->
+    <section class="tab-panel" data-tab="settings">
+      <div class="panel">
+        <h2>設定</h2>
+        <div class="buttons">
+          <button type="button" id="btn-logout" class="secondary">ログアウト</button>
+        </div>
+        <p class="loading">パスワード変更・表示設定は次のセッションで実装します。</p>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="js/player.js"></script>
+</body>
+</html>
