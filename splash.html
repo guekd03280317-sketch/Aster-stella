@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aster Stella — Stella System</title>
+  <style>
+    :root {
+      --cyan: #00e5ff;
+      --cyan-soft: #5cf2ff;
+      --gold: #ffd479;
+      --magenta: #ff4fa3;
+      --night-0: #02040d;
+      --night-1: #050a1f;
+      --night-2: #0b1638;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+      font-family: "Helvetica Neue", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif;
+      color: #eaf6ff;
+      letter-spacing: 0.04em;
+    }
+    #splash {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+    }
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .logo-wrap {
+      text-align: center;
+      transform: translateY(-2vh);
+      opacity: 0;
+      transition: opacity 1.2s ease;
+    }
+    .logo-wrap.show { opacity: 1; }
+    .logo-title {
+      font-size: clamp(40px, 8.5vw, 120px);
+      font-weight: 200;
+      letter-spacing: 0.32em;
+      margin: 0;
+      line-height: 1;
+      color: #fff;
+      text-shadow:
+        0 0 14px rgba(0, 229, 255, 0.55),
+        0 0 38px rgba(0, 229, 255, 0.35),
+        0 0 90px rgba(0, 229, 255, 0.2);
+    }
+    .logo-title .dot {
+      display: inline-block;
+      width: 0.18em;
+      height: 0.18em;
+      margin: 0 0.22em 0.18em;
+      background: var(--cyan);
+      border-radius: 50%;
+      vertical-align: middle;
+      box-shadow:
+        0 0 8px var(--cyan),
+        0 0 22px var(--cyan-soft);
+    }
+    .logo-sub {
+      margin-top: 1.2em;
+      font-size: clamp(11px, 1.4vw, 16px);
+      letter-spacing: 0.6em;
+      color: rgba(220, 240, 255, 0.55);
+      text-transform: uppercase;
+    }
+    .logo-jp {
+      margin-top: 0.8em;
+      font-size: clamp(10px, 1.2vw, 13px);
+      letter-spacing: 0.8em;
+      color: rgba(180, 210, 235, 0.4);
+    }
+    .enter-btn {
+      position: absolute;
+      bottom: 12vh;
+      padding: 14px 56px;
+      background: transparent;
+      color: #eaf6ff;
+      border: 1px solid rgba(0, 229, 255, 0.55);
+      letter-spacing: 0.6em;
+      font-size: 13px;
+      cursor: pointer;
+      pointer-events: auto;
+      opacity: 0;
+      transition: opacity 0.8s ease, background 0.3s, box-shadow 0.3s, transform 0.3s;
+      backdrop-filter: blur(4px);
+    }
+    .enter-btn.show { opacity: 1; }
+    .enter-btn:hover {
+      background: rgba(0, 229, 255, 0.08);
+      box-shadow:
+        0 0 20px rgba(0, 229, 255, 0.4),
+        inset 0 0 12px rgba(0, 229, 255, 0.15);
+      transform: translateY(-1px);
+    }
+    .skip {
+      position: fixed;
+      top: 18px;
+      right: 22px;
+      z-index: 3;
+      color: rgba(220, 240, 255, 0.45);
+      font-size: 11px;
+      letter-spacing: 0.3em;
+      cursor: pointer;
+      pointer-events: auto;
+      background: none;
+      border: none;
+      font-family: inherit;
+      padding: 6px 10px;
+    }
+    .skip:hover { color: #fff; }
+    .vignette {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse at center,
+        rgba(0,0,0,0) 45%,
+        rgba(0,0,0,0.55) 85%,
+        rgba(0,0,0,0.85) 100%);
+      z-index: 1;
+    }
+    .scanlines {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(255,255,255,0) 0px,
+        rgba(255,255,255,0) 2px,
+        rgba(255,255,255,0.012) 3px,
+        rgba(255,255,255,0) 4px
+      );
+      z-index: 1;
+      mix-blend-mode: overlay;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="splash"></canvas>
+  <div class="vignette"></div>
+  <div class="scanlines"></div>
+
+  <div class="overlay">
+    <div class="logo-wrap" id="logoWrap">
+      <h1 class="logo-title">Aster<span class="dot"></span>Stella</h1>
+      <div class="logo-sub">STELLA &nbsp; SYSTEM &nbsp; / &nbsp; CORE</div>
+      <div class="logo-jp">国　家　運　営　統　合　制　御</div>
+    </div>
+    <button class="enter-btn" id="enterBtn">ENTER</button>
+  </div>
+  <button class="skip" id="skipBtn">SKIP &gt;</button>
+
+<script>
+(() => {
+  const canvas = document.getElementById('splash');
+  const ctx = canvas.getContext('2d');
+  const logoWrap = document.getElementById('logoWrap');
+  const enterBtn = document.getElementById('enterBtn');
+  const skipBtn = document.getElementById('skipBtn');
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = canvas.width = Math.floor(window.innerWidth * DPR);
+    H = canvas.height = Math.floor(window.innerHeight * DPR);
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // ---------- Easing ----------
+  const easeOut = t => 1 - Math.pow(1 - t, 3);
+  const easeInOut = t => t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2;
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+  const phase = (t, a, b) => clamp01((t - a) / (b - a));
+
+  // ---------- Stars ----------
+  const STAR_COUNT = 260;
+  const stars = [];
+  function seedStars() {
+    stars.length = 0;
+    for (let i = 0; i < STAR_COUNT; i++) {
+      stars.push({
+        x: Math.random(),
+        y: Math.random() * 0.78,
+        r: Math.random() * 1.4 + 0.3,
+        tw: Math.random() * Math.PI * 2,
+        sp: 0.6 + Math.random() * 1.8,
+        hue: Math.random() < 0.15 ? 'gold' : (Math.random() < 0.4 ? 'cyan' : 'white'),
+      });
+    }
+  }
+  seedStars();
+  window.addEventListener('resize', seedStars);
+
+  const shootingStars = [];
+  function spawnShootingStar() {
+    shootingStars.push({
+      x: Math.random() * 0.6 + 0.2,
+      y: Math.random() * 0.3,
+      vx: 0.0018 + Math.random() * 0.0012,
+      vy: 0.0006 + Math.random() * 0.0005,
+      life: 0,
+      maxLife: 900 + Math.random() * 400,
+    });
+  }
+
+  function drawSky(now, globalAlpha) {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#02040d');
+    g.addColorStop(0.45, '#06112e');
+    g.addColorStop(0.85, '#020616');
+    g.addColorStop(1, '#000');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // distant nebula glow
+    const ng = ctx.createRadialGradient(W*0.5, H*0.55, 0, W*0.5, H*0.55, W*0.7);
+    ng.addColorStop(0, 'rgba(0, 120, 200, 0.18)');
+    ng.addColorStop(0.5, 'rgba(20, 40, 110, 0.08)');
+    ng.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = ng;
+    ctx.fillRect(0, 0, W, H);
+
+    // stars
+    for (const s of stars) {
+      const a = (0.35 + Math.sin(now * 0.001 * s.sp + s.tw) * 0.45) * globalAlpha;
+      const x = s.x * W, y = s.y * H, r = s.r * DPR;
+      let col = '255,255,255';
+      if (s.hue === 'cyan') col = '160,235,255';
+      if (s.hue === 'gold') col = '255,220,150';
+      ctx.fillStyle = `rgba(${col},${Math.max(0,a).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      if (s.r > 1.1) {
+        ctx.fillStyle = `rgba(${col},${(a*0.18).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(x, y, r * 3.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // shooting stars
+    for (let i = shootingStars.length - 1; i >= 0; i--) {
+      const s = shootingStars[i];
+      s.life += 16;
+      const t = s.life / s.maxLife;
+      if (t >= 1) { shootingStars.splice(i, 1); continue; }
+      const x = (s.x + s.vx * s.life) * W;
+      const y = (s.y + s.vy * s.life) * H;
+      const tailLen = 90 * DPR;
+      const tx = x - s.vx * 800 * W * 0.012;
+      const ty = y - s.vy * 800 * H * 0.012;
+      const grad = ctx.createLinearGradient(tx, ty, x, y);
+      const a = Math.sin(t * Math.PI) * globalAlpha;
+      grad.addColorStop(0, 'rgba(255,255,255,0)');
+      grad.addColorStop(1, `rgba(200,240,255,${a.toFixed(3)})`);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 1.2 * DPR;
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
+  }
+
+  // ---------- City skyline silhouette ----------
+  let skyline = null;
+  function buildSkyline() {
+    const segments = [];
+    let x = 0;
+    const baseY = 0.82;
+    while (x < 1.02) {
+      const w = 0.018 + Math.random() * 0.055;
+      const h = 0.04 + Math.random() * 0.18 + (Math.sin(x * 9) + 1) * 0.05;
+      segments.push({ x, w, h, hasLight: Math.random() < 0.4 });
+      x += w;
+    }
+    skyline = { segments, baseY };
+  }
+  buildSkyline();
+  window.addEventListener('resize', buildSkyline);
+
+  function drawSkyline(alpha) {
+    if (alpha <= 0) return;
+    // height unit caps buildings so portrait phones don't get skyscraper-tall silhouettes
+    const skyUnit = Math.min(H, W * 0.55);
+    const baseYpx = skyline.baseY * H;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (const seg of skyline.segments) {
+      const sx = seg.x * W;
+      const sy = baseYpx - seg.h * skyUnit;
+      const sw = seg.w * W;
+      ctx.lineTo(sx, H);
+      ctx.lineTo(sx, sy);
+      ctx.lineTo(sx + sw, sy);
+      ctx.lineTo(sx + sw, H);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    ctx.fill();
+
+    // top edge glow
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.35)';
+    ctx.lineWidth = 1 * DPR;
+    ctx.shadowColor = 'rgba(0, 229, 255, 0.7)';
+    ctx.shadowBlur = 8 * DPR;
+    ctx.beginPath();
+    let started = false;
+    for (const seg of skyline.segments) {
+      const sx = seg.x * W;
+      const sy = baseYpx - seg.h * skyUnit;
+      const sw = seg.w * W;
+      if (!started) { ctx.moveTo(sx, sy); started = true; }
+      else ctx.lineTo(sx, sy);
+      ctx.lineTo(sx + sw, sy);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // windows
+    for (const seg of skyline.segments) {
+      if (!seg.hasLight) continue;
+      const sx = seg.x * W;
+      const sy = baseYpx - seg.h * skyUnit;
+      const sw = seg.w * W;
+      const sh = seg.h * skyUnit;
+      const cols = Math.max(1, Math.floor(sw / (5 * DPR)));
+      const rows = Math.max(1, Math.floor(sh / (8 * DPR)));
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (Math.random() < 0.25) {
+            const wx = sx + (c + 0.3) * (sw / cols);
+            const wy = sy + (r + 0.3) * (sh / rows);
+            ctx.fillStyle = Math.random() < 0.5 ? 'rgba(255,220,150,0.35)' : 'rgba(160,230,255,0.32)';
+            ctx.fillRect(wx, wy, 1.4 * DPR, 1.4 * DPR);
+          }
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  // ---------- Line chart ----------
+  const lineData = [];
+  function seedLineData() {
+    lineData.length = 0;
+    let v = 0.45;
+    for (let i = 0; i < 70; i++) {
+      v += (Math.random() - 0.48) * 0.08;
+      v = Math.max(0.08, Math.min(0.92, v));
+      lineData.push(v);
+    }
+  }
+  seedLineData();
+
+  function drawLineChart(t, progress, alpha) {
+    if (alpha <= 0 || progress <= 0) return;
+    const x0 = W * 0.08, y0 = H * 0.18, w = W * 0.84, h = H * 0.42;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // grid
+    ctx.strokeStyle = 'rgba(120, 180, 220, 0.07)';
+    ctx.lineWidth = 1 * DPR;
+    for (let i = 0; i <= 4; i++) {
+      const gy = y0 + (h * i) / 4;
+      ctx.beginPath(); ctx.moveTo(x0, gy); ctx.lineTo(x0 + w, gy); ctx.stroke();
+    }
+
+    const n = lineData.length;
+    const drawCount = Math.max(2, Math.floor(n * progress));
+
+    // area fill under line
+    ctx.beginPath();
+    ctx.moveTo(x0, y0 + h);
+    for (let i = 0; i < drawCount; i++) {
+      const px = x0 + (i / (n - 1)) * w;
+      const py = y0 + h - lineData[i] * h;
+      ctx.lineTo(px, py);
+    }
+    const lastX = x0 + ((drawCount - 1) / (n - 1)) * w;
+    ctx.lineTo(lastX, y0 + h);
+    ctx.closePath();
+    const ag = ctx.createLinearGradient(0, y0, 0, y0 + h);
+    ag.addColorStop(0, 'rgba(0, 229, 255, 0.28)');
+    ag.addColorStop(1, 'rgba(0, 229, 255, 0)');
+    ctx.fillStyle = ag;
+    ctx.fill();
+
+    // line
+    ctx.strokeStyle = 'rgba(140, 240, 255, 0.95)';
+    ctx.lineWidth = 1.6 * DPR;
+    ctx.shadowColor = '#00e5ff';
+    ctx.shadowBlur = 14 * DPR;
+    ctx.beginPath();
+    for (let i = 0; i < drawCount; i++) {
+      const px = x0 + (i / (n - 1)) * w;
+      const py = y0 + h - lineData[i] * h;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // pulsing head dot
+    if (drawCount > 1) {
+      const i = drawCount - 1;
+      const px = x0 + (i / (n - 1)) * w;
+      const py = y0 + h - lineData[i] * h;
+      const pulse = 0.5 + Math.sin(t * 0.008) * 0.5;
+      ctx.fillStyle = '#fff';
+      ctx.shadowColor = '#00e5ff';
+      ctx.shadowBlur = (10 + pulse * 10) * DPR;
+      ctx.beginPath();
+      ctx.arc(px, py, (2 + pulse * 1.2) * DPR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    ctx.restore();
+  }
+
+  // ---------- Stacked bar chart ----------
+  const barCount = 22;
+  const bars = [];
+  function seedBars() {
+    bars.length = 0;
+    for (let i = 0; i < barCount; i++) {
+      bars.push({
+        a: 0.05 + Math.random() * 0.18,
+        b: 0.06 + Math.random() * 0.16,
+        c: 0.04 + Math.random() * 0.12,
+        delay: i * 0.04,
+      });
+    }
+  }
+  seedBars();
+
+  function drawBars(t, progress, alpha) {
+    if (alpha <= 0 || progress <= 0) return;
+    const x0 = W * 0.1, baseY = H * 0.78, w = W * 0.8;
+    const bw = (w / barCount) * 0.7;
+    const gap = (w / barCount) * 0.3;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    for (let i = 0; i < barCount; i++) {
+      const b = bars[i];
+      const local = clamp01((progress - b.delay) * 1.6);
+      const e = easeOut(local);
+      if (e <= 0) continue;
+      const ha = b.a * H * e;
+      const hb = b.b * H * e;
+      const hc = b.c * H * e;
+      const bx = x0 + i * (bw + gap);
+
+      // bottom segment (filled cyan glow)
+      ctx.fillStyle = 'rgba(0, 229, 255, 0.85)';
+      ctx.shadowColor = '#00e5ff';
+      ctx.shadowBlur = 10 * DPR;
+      ctx.fillRect(bx, baseY - ha, bw, ha);
+      // middle segment (gold)
+      ctx.fillStyle = 'rgba(255, 212, 121, 0.85)';
+      ctx.shadowColor = '#ffd479';
+      ctx.shadowBlur = 8 * DPR;
+      ctx.fillRect(bx, baseY - ha - hb, bw, hb);
+      // top segment (magenta)
+      ctx.fillStyle = 'rgba(255, 79, 163, 0.78)';
+      ctx.shadowColor = '#ff4fa3';
+      ctx.shadowBlur = 8 * DPR;
+      ctx.fillRect(bx, baseY - ha - hb - hc, bw, hc);
+      ctx.shadowBlur = 0;
+    }
+    // baseline
+    ctx.strokeStyle = 'rgba(180, 230, 255, 0.25)';
+    ctx.lineWidth = 1 * DPR;
+    ctx.beginPath();
+    ctx.moveTo(x0 - 4 * DPR, baseY);
+    ctx.lineTo(x0 + w + 4 * DPR, baseY);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ---------- Tank silhouette ----------
+  function drawTank(cx, cy, scale, alpha) {
+    if (alpha <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(cx, cy);
+    ctx.scale(scale * DPR, scale * DPR);
+
+    // edge glow color
+    ctx.shadowColor = 'rgba(0, 229, 255, 0.8)';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = '#000';
+    ctx.strokeStyle = 'rgba(140, 230, 255, 0.55)';
+    ctx.lineWidth = 1.1;
+
+    // tread
+    ctx.beginPath();
+    ctx.moveTo(-46, 10);
+    ctx.lineTo(46, 10);
+    ctx.lineTo(40, 18);
+    ctx.lineTo(-40, 18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // wheels
+    for (let i = -36; i <= 36; i += 12) {
+      ctx.beginPath();
+      ctx.arc(i, 14, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // hull
+    ctx.beginPath();
+    ctx.moveTo(-44, 10);
+    ctx.lineTo(-36, 0);
+    ctx.lineTo(36, 0);
+    ctx.lineTo(44, 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // turret
+    ctx.beginPath();
+    ctx.moveTo(-20, 0);
+    ctx.lineTo(-16, -10);
+    ctx.lineTo(16, -10);
+    ctx.lineTo(22, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // cannon
+    ctx.beginPath();
+    ctx.rect(18, -7, 30, 3);
+    ctx.fill();
+    ctx.stroke();
+
+    // hatch
+    ctx.beginPath();
+    ctx.arc(-2, -10, 3, Math.PI, 0);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
+  // ---------- Missile silhouette ----------
+  function drawMissile(cx, cy, scale, alpha, flip, angle) {
+    if (alpha <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(cx, cy);
+    if (angle) ctx.rotate(angle);
+    ctx.scale((flip ? -1 : 1) * scale * DPR, scale * DPR);
+
+    // smoke trail (drawn first, behind body)
+    const trailLen = 90 + Math.random() * 30;
+    const tg = ctx.createLinearGradient(-32, 0, -32 - trailLen, 0);
+    tg.addColorStop(0, 'rgba(220, 235, 255, 0.55)');
+    tg.addColorStop(0.4, 'rgba(180, 200, 220, 0.25)');
+    tg.addColorStop(1, 'rgba(120, 140, 160, 0)');
+    ctx.fillStyle = tg;
+    ctx.beginPath();
+    ctx.moveTo(-32, -2.5);
+    ctx.quadraticCurveTo(-32 - trailLen * 0.5, -4 + Math.random() * 1.5,
+                         -32 - trailLen, 0);
+    ctx.quadraticCurveTo(-32 - trailLen * 0.5, 4 - Math.random() * 1.5,
+                         -32, 2.5);
+    ctx.closePath();
+    ctx.fill();
+
+    // exhaust flame
+    const flameLen = 18 + Math.random() * 8;
+    const fg = ctx.createLinearGradient(-32, 0, -32 - flameLen, 0);
+    fg.addColorStop(0, 'rgba(255, 230, 160, 0.95)');
+    fg.addColorStop(0.4, 'rgba(255, 130, 60, 0.7)');
+    fg.addColorStop(1, 'rgba(255, 60, 30, 0)');
+    ctx.fillStyle = fg;
+    ctx.beginPath();
+    ctx.moveTo(-32, -2.2);
+    ctx.lineTo(-32 - flameLen, 0);
+    ctx.lineTo(-32, 2.2);
+    ctx.closePath();
+    ctx.fill();
+
+    // body
+    ctx.shadowColor = 'rgba(0, 229, 255, 0.75)';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = '#000';
+    ctx.strokeStyle = 'rgba(160, 240, 255, 0.65)';
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(-32, -3);
+    ctx.lineTo(22, -3);
+    ctx.lineTo(34, 0);     // nose tip
+    ctx.lineTo(22, 3);
+    ctx.lineTo(-32, 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // tail fins (top & bottom at rear)
+    ctx.beginPath();
+    ctx.moveTo(-32, -3);
+    ctx.lineTo(-38, -10);
+    ctx.lineTo(-22, -3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-32, 3);
+    ctx.lineTo(-38, 10);
+    ctx.lineTo(-22, 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // mid-body steering fins (smaller)
+    ctx.beginPath();
+    ctx.moveTo(0, -3);
+    ctx.lineTo(-4, -8);
+    ctx.lineTo(6, -3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, 3);
+    ctx.lineTo(-4, 8);
+    ctx.lineTo(6, 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // nose seam
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(160, 240, 255, 0.35)';
+    ctx.beginPath();
+    ctx.moveTo(20, -2.5);
+    ctx.lineTo(20, 2.5);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // tank instances
+  const tanks = [
+    { t0: 1300, dur: 4200, y: 0.81, scale: 1.1 },
+    { t0: 2100, dur: 4200, y: 0.84, scale: 0.9 },
+  ];
+  // missile instances
+  const missiles = [
+    { t0: 1900, dur: 2600, y: 0.18, scale: 1.0, flip: false, angle:  0.06 },
+    { t0: 2500, dur: 2600, y: 0.30, scale: 0.85, flip: true, angle: -0.05 },
+    { t0: 3100, dur: 2600, y: 0.12, scale: 0.75, flip: false, angle:  0.10 },
+    { t0: 3700, dur: 2400, y: 0.24, scale: 0.7, flip: true,  angle: -0.08 },
+  ];
+
+  // ---------- Central star ----------
+  function drawCoreStar(now, alpha, scale) {
+    if (alpha <= 0) return;
+    const cx = W * 0.5, cy = H * 0.5;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // halo
+    const haloR = 220 * DPR * scale;
+    const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloR);
+    halo.addColorStop(0, 'rgba(0, 229, 255, 0.55)');
+    halo.addColorStop(0.25, 'rgba(0, 180, 255, 0.18)');
+    halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(cx - haloR, cy - haloR, haloR * 2, haloR * 2);
+
+    // core
+    const coreR = (10 + Math.sin(now * 0.004) * 1.5) * DPR * scale;
+    const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR * 2);
+    core.addColorStop(0, '#ffffff');
+    core.addColorStop(0.4, '#aaf2ff');
+    core.addColorStop(1, 'rgba(0, 229, 255, 0)');
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(cx, cy, coreR * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // diffraction spikes
+    ctx.strokeStyle = 'rgba(200, 240, 255, 0.55)';
+    ctx.lineWidth = 1.2 * DPR;
+    ctx.shadowColor = '#00e5ff';
+    ctx.shadowBlur = 18 * DPR;
+    const spike = (120 + Math.sin(now * 0.003) * 12) * DPR * scale;
+    ctx.beginPath(); ctx.moveTo(cx - spike, cy); ctx.lineTo(cx + spike, cy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, cy - spike); ctx.lineTo(cx, cy + spike); ctx.stroke();
+    ctx.strokeStyle = 'rgba(200, 240, 255, 0.28)';
+    const sd = spike * 0.65;
+    ctx.beginPath(); ctx.moveTo(cx - sd, cy - sd); ctx.lineTo(cx + sd, cy + sd); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - sd, cy + sd); ctx.lineTo(cx + sd, cy - sd); ctx.stroke();
+
+    // orbit ring
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.25)';
+    ctx.lineWidth = 1 * DPR;
+    const ringR = 90 * DPR * scale;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, ringR, ringR * 0.32, now * 0.0006, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 212, 121, 0.18)';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, ringR * 1.4, ringR * 0.45, -now * 0.0004, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // ---------- HUD ticks ----------
+  function drawHUD(now, alpha) {
+    if (alpha <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = 'rgba(120, 200, 230, 0.25)';
+    ctx.fillStyle = 'rgba(160, 220, 240, 0.45)';
+    ctx.lineWidth = 1 * DPR;
+    ctx.font = `${10 * DPR}px monospace`;
+
+    // corner brackets
+    const m = 28 * DPR, b = 18 * DPR;
+    ctx.beginPath();
+    ctx.moveTo(m, m + b); ctx.lineTo(m, m); ctx.lineTo(m + b, m);
+    ctx.moveTo(W - m, m + b); ctx.lineTo(W - m, m); ctx.lineTo(W - m - b, m);
+    ctx.moveTo(m, H - m - b); ctx.lineTo(m, H - m); ctx.lineTo(m + b, H - m);
+    ctx.moveTo(W - m, H - m - b); ctx.lineTo(W - m, H - m); ctx.lineTo(W - m - b, H - m);
+    ctx.stroke();
+
+    // status text
+    const tick = Math.floor(now / 80) % 100;
+    ctx.fillText(`STELLA / SYS  ::  ${String(tick).padStart(2,'0')}`, m + 8 * DPR, m - 6 * DPR);
+    ctx.fillText(`LAT 35.68 / LON 139.76`, W - m - 160 * DPR, m - 6 * DPR);
+    ctx.fillText(`> initializing core`, m + 8 * DPR, H - m + 14 * DPR);
+    ctx.restore();
+  }
+
+  // ---------- Timeline (tempo up — overlapping phases) ----------
+  // 0.0–0.6s   sky/stars fade in
+  // 0.4–1.6s   skyline rises
+  // 0.8–2.6s   line chart draws (with HUD)
+  // 1.5–3.1s   bar chart stacks up   (starts while line is still drawing)
+  // 1.3–4.2s   tanks roll across
+  // 1.9–4.6s   missiles streak       (starts while bars rise)
+  // 3.6–5.0s   everything fades to background, core star expands
+  // 4.4s       logo reveal
+  // 5.2s       ENTER reveal
+
+  let started = performance.now();
+  let logoShown = false, btnShown = false;
+  let lastShoot = 0;
+
+  function render(nowAbs) {
+    const t = nowAbs - started;
+
+    // base layer fades out late
+    const sceneFade = 1 - easeInOut(phase(t, 3600, 5000)) * 0.65;
+    const starGlobal = 0.4 + 0.6 * easeOut(phase(t, 0, 900));
+
+    drawSky(nowAbs, starGlobal);
+
+    // skyline
+    const skylineA = easeOut(phase(t, 400, 1600)) * sceneFade;
+    drawSkyline(skylineA * 0.95);
+
+    // line chart
+    const lineProg = easeOut(phase(t, 800, 2600));
+    const lineA = easeOut(phase(t, 800, 1300)) * (1 - easeOut(phase(t, 3600, 4700)));
+    drawLineChart(t, lineProg, lineA);
+
+    // bar chart
+    const barProg = easeOut(phase(t, 1500, 3100));
+    const barA = easeOut(phase(t, 1500, 1900)) * (1 - easeOut(phase(t, 3600, 4700)));
+    drawBars(t, barProg, barA);
+
+    // tanks
+    for (const tk of tanks) {
+      const local = clamp01((t - tk.t0) / tk.dur);
+      if (local <= 0 || local >= 1) continue;
+      const x = -60 * DPR + local * (W + 120 * DPR);
+      const fade = Math.sin(local * Math.PI);
+      drawTank(x, H * tk.y, tk.scale * (W / (1280 * DPR)) * 1.6 + 0.4, fade * sceneFade);
+    }
+
+    // missiles
+    for (const m of missiles) {
+      const local = clamp01((t - m.t0) / m.dur);
+      if (local <= 0 || local >= 1) continue;
+      const x = m.flip
+        ? W + 80 * DPR - local * (W + 160 * DPR)
+        : -80 * DPR + local * (W + 160 * DPR);
+      const yWave = Math.sin(local * Math.PI) * 6 * DPR;
+      const fade = Math.sin(local * Math.PI);
+      drawMissile(x, H * m.y + yWave, m.scale * (W / (1280 * DPR)) * 1.6 + 0.4, fade * sceneFade, m.flip, m.angle);
+    }
+
+    // shooting stars occasionally
+    if (t > 400 && nowAbs - lastShoot > 1100 && Math.random() < 0.03) {
+      spawnShootingStar();
+      lastShoot = nowAbs;
+    }
+
+    // HUD
+    const hudA = easeOut(phase(t, 700, 1500)) * (1 - easeOut(phase(t, 3600, 4700)));
+    drawHUD(nowAbs, hudA * 0.9);
+
+    // core star
+    const starScale = 0.4 + easeOut(phase(t, 3600, 5000)) * 1.0;
+    const starA = easeOut(phase(t, 3400, 4800));
+    drawCoreStar(nowAbs, starA, starScale);
+
+    // logo reveal
+    if (!logoShown && t > 4400) {
+      logoShown = true;
+      logoWrap.classList.add('show');
+    }
+    if (!btnShown && t > 5200) {
+      btnShown = true;
+      enterBtn.classList.add('show');
+    }
+
+    requestAnimationFrame(render);
+  }
+
+  requestAnimationFrame(render);
+
+  // controls
+  function goToApp() { window.location.href = 'player-login.html'; }
+  enterBtn.addEventListener('click', goToApp);
+  skipBtn.addEventListener('click', goToApp);
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') goToApp();
+    if (e.key === 'Escape') goToApp();
+  });
+})();
+</script>
+</body>
+</html>
