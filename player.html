@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Aster Stella - playerサイド</title>
   <link rel="stylesheet" href="css/style.css">
+  <script defer src="js/background-fx.js"></script>
 </head>
 <body>
   <header>
@@ -16,7 +17,7 @@
     <button type="button" class="tab-btn active" data-tab="dashboard">ダッシュボード</button>
     <button type="button" class="tab-btn" data-tab="map">地図</button>
     <button type="button" class="tab-btn" data-tab="domestic">内政</button>
-    <button type="button" class="tab-btn" data-tab="industry">産業</button>
+    <button type="button" class="tab-btn" data-tab="statepolicy">ステート政策</button>
     <button type="button" class="tab-btn" data-tab="economy">経済 / 貿易</button>
     <button type="button" class="tab-btn" data-tab="research">研究</button>
     <button type="button" class="tab-btn" data-tab="diplomacy">外交</button>
@@ -65,6 +66,13 @@
           <label>表示モード
             <select id="display-mode"></select>
           </label>
+          <label>地図テーマ
+            <select id="map-theme">
+              <option value="normal">標準</option>
+              <option value="dark">ダーク</option>
+              <option value="contrast">ハイコントラスト</option>
+            </select>
+          </label>
           <label class="checkbox-row">
             <input type="checkbox" id="highlight-own"> 自国領のみハイライト
           </label>
@@ -86,12 +94,12 @@
         <div id="tax-control"></div>
       </div>
       <div class="panel">
-        <h2>投資（ステート単位）</h2>
-        <div id="invest-control"></div>
-      </div>
-      <div class="panel">
         <h2>予備兵の徴兵</h2>
         <div id="conscript-control"></div>
+      </div>
+      <div class="panel">
+        <h2>領土の編入</h2>
+        <div id="annex-control"></div>
       </div>
       <div class="panel">
         <h2>予約中の操作</h2>
@@ -99,19 +107,34 @@
       </div>
     </section>
 
-    <!-- 産業 -->
-    <section class="tab-panel" data-tab="industry">
+    <!-- ステート政策 -->
+    <section class="tab-panel" data-tab="statepolicy">
       <div class="panel">
-        <h2>産業の建設 / 解体</h2>
-        <div id="industry-control"></div>
+        <h2>ステートを選ぶ</h2>
+        <p class="loading">カードをタップ、または地図タブで自国領をタップして選択できます。</p>
+        <div id="state-cards" class="state-cards"></div>
       </div>
       <div class="panel">
-        <h2>自国の産業設置数</h2>
-        <div id="industry-summary"></div>
+        <h2>選択中のステート</h2>
+        <div id="sp-selected">
+          <p class="loading">ステートを選んでください。</p>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>投資（開発度・インフラ・統治）</h2>
+        <div id="sp-invest"></div>
+      </div>
+      <div class="panel">
+        <h2>産業の建設 / 解体</h2>
+        <div id="sp-industry"></div>
+      </div>
+      <div class="panel">
+        <h2>このステートの産業設置数</h2>
+        <div id="sp-summary"></div>
       </div>
       <div class="panel">
         <h2>予約中の操作</h2>
-        <div id="industry-orders" class="order-list"></div>
+        <div id="statepolicy-orders" class="order-list"></div>
       </div>
     </section>
 
@@ -150,19 +173,44 @@
         <div id="research-orders" class="order-list"></div>
       </div>
     </section>
-    <!-- 外交 -->
+    <!-- 外交 / 通信 -->
     <section class="tab-panel" data-tab="diplomacy">
-      <div class="panel"><h2>外交</h2><p class="loading">このタブは後で実装します（NPC国家の追加後）。</p></div>
+      <div class="panel">
+        <h2>メール受信箱</h2>
+        <div id="mail-inbox" class="mail-list"></div>
+      </div>
+      <div class="panel">
+        <h2>メール作成（送金・物資添付可）</h2>
+        <div id="mail-compose"></div>
+      </div>
+      <div class="panel">
+        <h2>取引提案（個人間貿易）</h2>
+        <div id="trade-compose"></div>
+        <h4 class="subhead">提案一覧</h4>
+        <div id="trade-list" class="order-list"></div>
+      </div>
+      <div class="panel">
+        <h2>掲示板</h2>
+        <div id="board-compose"></div>
+        <div id="board-list" class="mail-list"></div>
+      </div>
     </section>
 
     <!-- 設定 -->
     <section class="tab-panel" data-tab="settings">
       <div class="panel">
-        <h2>設定</h2>
+        <h2>パスワードの変更</h2>
+        <div id="password-control"></div>
+      </div>
+      <div class="panel">
+        <h2>国旗色の変更</h2>
+        <div id="color-control"></div>
+      </div>
+      <div class="panel">
+        <h2>その他</h2>
         <div class="buttons">
           <button type="button" id="btn-logout" class="secondary">ログアウト</button>
         </div>
-        <p class="loading">パスワード変更・表示設定は次のセッションで実装します。</p>
       </div>
     </section>
   </main>
