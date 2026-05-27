@@ -7,16 +7,34 @@
 //   石油資源: スポット3か所=100、1-hop=90、2-hop=50-80、その他は低確率で1-10
 //   重要鉱物: 10%=80-100, 30%=1-10, それ以外=0
 
+// 運営が調整できる配分設定のデフォルト。aster_stella/config/resourceDist で上書き可能。
+export const DEFAULT_DIST = {
+  fertilityMin: 50, fertilityMax: 100,
+  metalProb: 0.5, metalLowMin: 1, metalLowMax: 10, metalMidMin: 20, metalMidMax: 50, metalHighMin: 50, metalHighMax: 100,
+  metalLowShare: 0.8, metalMidShare: 0.1, // 残りが high
+  rareHighProb: 0.10, rareLowProb: 0.30, rareHighMin: 80, rareHighMax: 100, rareLowMin: 1, rareLowMax: 10,
+  oilSpotCount: 3, oilSpotLevel: 100, oilHop1: 90, oilHop2Min: 50, oilHop2Max: 80, oilLowProb: 0.05, oilLowMin: 1, oilLowMax: 10
+};
+
+function mergeDist(d) {
+  const out = {};
+  for (const k of Object.keys(DEFAULT_DIST)) {
+    const v = d && d[k];
+    out[k] = (typeof v === "number" && isFinite(v)) ? v : DEFAULT_DIST[k];
+  }
+  return out;
+}
+
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function rollMetalLike() {
-  if (Math.random() >= 0.5) return 0;
+function rollMetalLike(d) {
+  if (Math.random() >= d.metalProb) return 0;
   const r = Math.random();
-  if (r < 0.8) return randInt(1, 10);
-  if (r < 0.9) return randInt(20, 50);
-  return randInt(50, 100);
+  if (r < d.metalLowShare) return randInt(d.metalLowMin, d.metalLowMax);
+  if (r < d.metalLowShare + d.metalMidShare) return randInt(d.metalMidMin, d.metalMidMax);
+  return randInt(d.metalHighMin, d.metalHighMax);
 }
 
 /**
@@ -27,23 +45,24 @@ function rollMetalLike() {
  * @returns {{oilSpots: string[]}}
  */
 export function placeResources(states, adjacency, opts = {}) {
-  const oilSpotCount = Math.max(0, Math.floor(opts.oilSpotCount ?? 3));
-  const oilLowProb = clamp01(opts.oilLowProb ?? 0.05);
+  const d = mergeDist(opts.dist);
+  const oilSpotCount = Math.max(0, Math.floor(opts.oilSpotCount ?? d.oilSpotCount));
+  const oilLowProb = clamp01(opts.oilLowProb ?? d.oilLowProb);
 
   const names = Object.keys(states);
 
-  // 肥沃度（全ステート 50-100）
-  for (const n of names) states[n].resources.fertility = randInt(50, 100);
+  // 肥沃度
+  for (const n of names) states[n].resources.fertility = randInt(d.fertilityMin, d.fertilityMax);
 
   // 金属 / 炭田（同じ分布）
-  for (const n of names) states[n].resources.metal = rollMetalLike();
-  for (const n of names) states[n].resources.coal = rollMetalLike();
+  for (const n of names) states[n].resources.metal = rollMetalLike(d);
+  for (const n of names) states[n].resources.coal = rollMetalLike(d);
 
   // 重要鉱物
   for (const n of names) {
     const r = Math.random();
-    if (r < 0.10) states[n].resources.rareMineral = randInt(80, 100);
-    else if (r < 0.40) states[n].resources.rareMineral = randInt(1, 10);
+    if (r < d.rareHighProb) states[n].resources.rareMineral = randInt(d.rareHighMin, d.rareHighMax);
+    else if (r < d.rareHighProb + d.rareLowProb) states[n].resources.rareMineral = randInt(d.rareLowMin, d.rareLowMax);
     else states[n].resources.rareMineral = 0;
   }
 
@@ -66,18 +85,18 @@ export function placeResources(states, adjacency, opts = {}) {
 
   // oilLevel: スポット > 1-hop > 2-hop で重ね塗りし、最大値を採用
   const oilLevel = new Map();
-  for (const s of spots) oilLevel.set(s, 100);
+  for (const s of spots) oilLevel.set(s, d.oilSpotLevel);
   for (const s of spots) {
     for (const n of (adjacency[s] || [])) {
       const prev = oilLevel.get(n) ?? -Infinity;
-      if (90 > prev) oilLevel.set(n, 90);
+      if (d.oilHop1 > prev) oilLevel.set(n, d.oilHop1);
     }
   }
   for (const s of spots) {
     for (const n1 of (adjacency[s] || [])) {
       for (const n2 of (adjacency[n1] || [])) {
         if (oilLevel.has(n2)) continue; // スポット/1-hop は触らない
-        oilLevel.set(n2, randInt(50, 80));
+        oilLevel.set(n2, randInt(d.oilHop2Min, d.oilHop2Max));
       }
     }
   }
@@ -86,7 +105,7 @@ export function placeResources(states, adjacency, opts = {}) {
     if (oilLevel.has(n)) {
       states[n].resources.oil = oilLevel.get(n);
     } else if (Math.random() < oilLowProb) {
-      states[n].resources.oil = randInt(1, 10);
+      states[n].resources.oil = randInt(d.oilLowMin, d.oilLowMax);
     }
   }
 

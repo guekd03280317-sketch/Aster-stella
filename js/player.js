@@ -9,7 +9,7 @@
 //
 // 内政/産業/経済/研究/外交タブは予約方式(js/orders.js)の上に次のセッションで実装する。
 
-import { db, ref, get } from "./firebase-config.js";
+import { db, ref, get, set } from "./firebase-config.js";
 import { requirePlayerSession, clearSession } from "./player-auth.js";
 import { attachPanZoom } from "./map-pan-zoom.js";
 import { normalizeState, INDUSTRY_FIELDS } from "./state-schema.js";
@@ -25,19 +25,29 @@ import { addOrder, cancelOrder, subscribeOrders } from "./orders.js";
 import { describeOrder, orderLabel, MARKET_RESOURCES, normalizeMarket } from "./player-schema.js";
 import {
   FLOW_RESOURCES, computeTurn, investCost, CONFIG,
-  buildCost, canBuildIndustry, civilianIdeology
+  buildCost, canBuildIndustry, civilianIdeology, annexCost
 } from "./economy.js";
 import { barChart, pieChart, lineChart, chartLegend } from "./charts.js";
+import {
+  sendMail, subscribeMail, markMailRead, deleteMail,
+  postBoard, subscribeBoard, deleteBoardPost,
+  createTradeProposal, subscribeTradeProposals, cancelTradeProposal
+} from "./mail.js";
 
 const PICKED_STROKE = "#ffd166";
 const PICKED_STROKE_W = "2.5";
 
 const SVG_URL = "MapChart_Map.svg";
-const COLOR_NO_COUNTRY = "#1d2738";
-const HEAT_LOW = [29, 39, 56];     // #1d2738
-const HEAT_HIGH = [90, 169, 255];  // #5aa9ff
 const PRESENCE_YES = "#7be0c7";
-const FADE_OTHER = "#10151f";
+
+// 地図テーマ（標準 / ダーク / ハイコントラスト）。CSS filter と未所属色をまとめる。
+const MAP_THEMES = {
+  normal:   { noCountry: "#1d2738", fadeOther: "#10151f", heatLow: [29, 39, 56],  heatHigh: [90, 169, 255], filter: "" },
+  dark:     { noCountry: "#070b13", fadeOther: "#050810", heatLow: [12, 20, 34],  heatHigh: [74, 142, 220], filter: "brightness(0.82) saturate(1.05) contrast(1.05)" },
+  contrast: { noCountry: "#26334d", fadeOther: "#0c1320", heatLow: [40, 60, 100], heatHigh: [120, 200, 255], filter: "saturate(1.35) contrast(1.18)" }
+};
+let mapTheme = (typeof localStorage !== "undefined" && localStorage.getItem("aster_stella_map_theme")) || "normal";
+function theme() { return MAP_THEMES[mapTheme] || MAP_THEMES.normal; }
 
 // 地図の表示モード（playerサイド版）。
 // 資源は仕様により「あるかないか」のみ表示する（presence）。
@@ -82,7 +92,12 @@ let market = null;         // aster_stella/market
 let history = [];          // aster_stella/history（日次スナップショット配列）
 let latestOrders = [];     // 自国の予約一覧（subscribeで更新）
 let pickedStateName = null; // 政策対象として地図で選んだ自国ステート
-const policyUpdaters = {};  // { domestic, industry } 選択ステート反映の更新関数
+let lastTappedStateName = null; // 編入用：直近にタップしたステート（自国以外も）
+let adjacency = {};         // aster_stella/map の隣接関係
+let latestMail = [];
+let latestBoard = [];
+let latestProposals = [];
+const policyUpdaters = {};  // { domestic, industry, annex } 選択ステート反映の更新関数
 
 // ---- DOM ----
 const hdrNation = document.getElementById("hdr-nation");
@@ -118,9 +133,10 @@ async function init() {
   buildDisplayModes();
   renderDashboard();
   renderDomestic();
-  renderIndustry();
+  renderStatePolicy();
   renderEconomy();
   renderResearch();
+  renderSettings();
   await loadMaps();
   setupTabs();
   setupSettings();
@@ -130,6 +146,11 @@ async function init() {
     latestOrders = orders;
     renderAllPendingOrders();
   });
+  // メール・掲示板・取引提案を購読
+  subscribeMail(nationId, (list) => { latestMail = list; renderMailInbox(); });
+  subscribeBoard((list) => { latestBoard = list; renderBoardList(); });
+  subscribeTradeProposals((list) => { latestProposals = list; renderTradeList(); });
+  renderDiplomacy();
 }
 
 function ownStatesList() {
@@ -142,14 +163,17 @@ function ownStatesList() {
 }
 
 async function loadData() {
-  const [nationSnap, statesSnap, nationsSnap, worldSnap, marketSnap, historySnap] = await Promise.all([
+  const [nationSnap, statesSnap, nationsSnap, worldSnap, marketSnap, historySnap, mapSnap] = await Promise.all([
     get(ref(db, `aster_stella/nations/${nationId}`)),
     get(ref(db, "aster_stella/states")),
     get(ref(db, "aster_stella/nations")),
     get(ref(db, "aster_stella/world")),
     get(ref(db, "aster_stella/market")),
-    get(ref(db, "aster_stella/history"))
+    get(ref(db, "aster_stella/history")),
+    get(ref(db, "aster_stella/map"))
   ]);
+  const mapData = mapSnap.exists() ? mapSnap.val() : null;
+  adjacency = (mapData && mapData.adjacency) ? mapData.adjacency : {};
   if (!nationSnap.exists()) throw new Error("自国データが見つかりません");
   nation = normalizeNation(nationSnap.val());
   if (!nation.id) nation.id = nationId;
@@ -165,7 +189,7 @@ async function loadData() {
   for (const id of Object.keys(nationsRaw)) {
     const n = nationsRaw[id] || {};
     nationsById[id] = {
-      id, name: n.name || id, color: n.color || COLOR_NO_COUNTRY,
+      id, name: n.name || id, color: n.color || theme().noCountry,
       totalEconomy: Number(n.stats && n.stats.totalEconomy) || 0
     };
   }
@@ -264,7 +288,7 @@ function swatchField(label, value, color) {
   const val = wrap.querySelector(".field-value");
   const sw = document.createElement("span");
   sw.className = "nation-swatch inline";
-  sw.style.background = color || COLOR_NO_COUNTRY;
+  sw.style.background = color || theme().noCountry;
   val.prepend(sw);
   return wrap;
 }
@@ -343,7 +367,7 @@ function paintMini(svg) {
   svg.querySelectorAll("#map > path").forEach((p) => {
     if (!p.id || p.id.startsWith("pattern")) return;
     const own = statesData[p.id] && statesData[p.id].country === nation.id;
-    p.setAttribute("fill", own ? (nation.color || "#5aa9ff") : FADE_OTHER);
+    p.setAttribute("fill", own ? (nation.color || "#5aa9ff") : theme().fadeOther);
     p.style.cursor = "default";
   });
 }
@@ -368,21 +392,21 @@ function applyMapColors() {
     const s = statesData[name];
     const isOwn = s && s.country === nation.id;
     if (highlightOwn && !isOwn) {
-      p.setAttribute("fill", FADE_OTHER);
+      p.setAttribute("fill", theme().fadeOther);
       continue;
     }
-    let fill = COLOR_NO_COUNTRY;
+    let fill = theme().noCountry;
     if (!s) {
-      fill = COLOR_NO_COUNTRY;
+      fill = theme().noCountry;
     } else if (mode.kind === "category") {
       const n = s.country ? nationsById[s.country] : null;
-      fill = n ? n.color : COLOR_NO_COUNTRY;
+      fill = n ? n.color : theme().noCountry;
     } else if (mode.kind === "number") {
       const v = Number(getByPath(s, mode.path)) || 0;
       fill = heat((v - min) / (max - min));
     } else if (mode.kind === "presence") {
       const v = Number(getByPath(s, mode.path)) || 0;
-      fill = v > 0 ? PRESENCE_YES : COLOR_NO_COUNTRY;
+      fill = v > 0 ? PRESENCE_YES : theme().noCountry;
     }
     p.setAttribute("fill", fill);
   }
@@ -399,7 +423,8 @@ function getByPath(obj, path) {
 
 function heat(t) {
   t = Math.max(0, Math.min(1, t));
-  const c = HEAT_LOW.map((lo, i) => Math.round(lo + (HEAT_HIGH[i] - lo) * t));
+  const lo = theme().heatLow, hi = theme().heatHigh;
+  const c = lo.map((v, i) => Math.round(v + (hi[i] - v) * t));
   return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
 }
 
@@ -457,6 +482,14 @@ function switchTab(tab) {
   for (const p of panels) p.classList.toggle("active", p.dataset.tab === tab);
 }
 
+function applyMapTheme() {
+  const f = theme().filter || "";
+  const mc = document.getElementById("map-container");
+  if (mc) mc.style.filter = f;
+  const mini = document.getElementById("mini-map");
+  if (mini) mini.style.filter = f;
+}
+
 function applyPickedHighlight() {
   if (!pickedStateName) return;
   const el = elById.get(pickedStateName);
@@ -476,8 +509,7 @@ function pickState(name) {
   if (pickedStateName && pickedStateName !== name) restoreStroke(pickedStateName);
   pickedStateName = name;
   applyPickedHighlight();
-  if (policyUpdaters.domestic) policyUpdaters.domestic();
-  if (policyUpdaters.industry) policyUpdaters.industry();
+  if (policyUpdaters.statepolicy) policyUpdaters.statepolicy();
   flash(name + " を政策対象に選択しました。", "ok");
 }
 
@@ -492,7 +524,9 @@ function setupTabs() {
     const p = e.target.closest("path");
     if (!p || !elById.has(p.id)) return;
     showStateInfo(p.id);
+    lastTappedStateName = p.id;
     if (statesData[p.id] && statesData[p.id].country === nation.id) pickState(p.id);
+    if (policyUpdaters.annex) policyUpdaters.annex();
   });
 
   displayModeSelect.addEventListener("change", () => {
@@ -503,6 +537,21 @@ function setupTabs() {
     highlightOwn = highlightChk.checked;
     applyMapColors();
   });
+  const themeSel = document.getElementById("map-theme");
+  if (themeSel) {
+    themeSel.value = mapTheme;
+    themeSel.addEventListener("change", () => {
+      mapTheme = themeSel.value;
+      try { localStorage.setItem("aster_stella_map_theme", mapTheme); } catch (_) {}
+      applyMapColors();
+      applyPickedHighlight();
+      applyMapTheme();
+      // ミニ地図の自国強調も塗り直す（fadeOther を使うため）
+      const miniSvg = document.querySelector("#mini-map svg");
+      if (miniSvg) paintMini(miniSvg);
+    });
+  }
+  applyMapTheme();
 
   document.getElementById("btn-zoom-in").addEventListener("click", () => panZoom && panZoom.zoomIn());
   document.getElementById("btn-zoom-out").addEventListener("click", () => panZoom && panZoom.zoomOut());
@@ -514,6 +563,251 @@ function setupSettings() {
     clearSession();
     window.location.replace("player-login.html");
   });
+}
+
+function otherNationOptions() {
+  return Object.values(nationsById)
+    .filter((n) => n.id !== nation.id)
+    .map((n) => ({ value: n.id, label: n.name }));
+}
+function nationName(id) {
+  return (nationsById[id] && nationsById[id].name) || id;
+}
+function resourceSelect(includeNone) {
+  const opts = FLOW_RESOURCES.map((r) => ({ value: r.key, label: r.label }));
+  if (includeNone) opts.unshift({ value: "", label: "（なし）" });
+  return selectInput(opts);
+}
+
+// -----------------------------------------------------------------------------
+// 設定（パスワード変更・国旗色変更）
+// -----------------------------------------------------------------------------
+function renderSettings() {
+  // パスワード
+  const pwBox = document.getElementById("password-control");
+  pwBox.innerHTML = "";
+  const oldI = document.createElement("input"); oldI.type = "password"; oldI.placeholder = "現在のパスワード";
+  const newI = document.createElement("input"); newI.type = "password"; newI.placeholder = "新しいパスワード";
+  const conf = document.createElement("input"); conf.type = "password"; conf.placeholder = "新しいパスワード（確認）";
+  for (const i of [oldI, newI, conf]) i.className = "settings-input";
+  const pwBtn = actionButton("パスワードを変更", async () => {
+    if (oldI.value !== (nation.password || "")) { flash("現在のパスワードが違います。", "err"); return; }
+    if (!newI.value) { flash("新しいパスワードを入力してください。", "err"); return; }
+    if (newI.value !== conf.value) { flash("確認用が一致しません。", "err"); return; }
+    pwBtn.disabled = true;
+    try {
+      await set(ref(db, `aster_stella/nations/${nation.id}/password`), newI.value);
+      nation.password = newI.value;
+      oldI.value = newI.value = conf.value = "";
+      flash("パスワードを変更しました。", "ok");
+    } catch (err) { flash("変更に失敗: " + err.message, "err"); }
+    finally { pwBtn.disabled = false; }
+  });
+  pwBox.appendChild(labeled("現在のパスワード", oldI));
+  pwBox.appendChild(labeled("新しいパスワード", newI));
+  pwBox.appendChild(labeled("新しいパスワード（確認）", conf));
+  pwBox.appendChild(row(pwBtn));
+
+  // 国旗色
+  const colorBox = document.getElementById("color-control");
+  colorBox.innerHTML = "";
+  const colorI = document.createElement("input"); colorI.type = "color"; colorI.value = nation.color || "#888888";
+  const colorBtn = actionButton("国旗色を変更", async () => {
+    colorBtn.disabled = true;
+    try {
+      await set(ref(db, `aster_stella/nations/${nation.id}/color`), colorI.value);
+      nation.color = colorI.value;
+      if (nationsById[nation.id]) nationsById[nation.id].color = colorI.value;
+      applyMapColors(); applyPickedHighlight();
+      renderDashboard();
+      flash("国旗色を変更しました。", "ok");
+    } catch (err) { flash("変更に失敗: " + err.message, "err"); }
+    finally { colorBtn.disabled = false; }
+  });
+  colorBox.appendChild(row(labeled("色", colorI), colorBtn));
+  colorBox.appendChild(noteP("地図やダッシュボードの自国色に反映されます。"));
+}
+
+// -----------------------------------------------------------------------------
+// 外交 / 通信（メール・取引提案・掲示板）
+// -----------------------------------------------------------------------------
+function renderDiplomacy() {
+  // メール作成
+  const mc = document.getElementById("mail-compose");
+  mc.innerHTML = "";
+  if (!otherNationOptions().length) {
+    mc.appendChild(noteP("他の国家がいません。"));
+  } else {
+    const toSel = selectInput(otherNationOptions());
+    const subj = document.createElement("input"); subj.className = "settings-input"; subj.placeholder = "件名";
+    const body = document.createElement("textarea"); body.className = "nation-description"; body.placeholder = "本文";
+    const moneyI = numberInput(0, { step: "1", min: 0 });
+    const resSel = resourceSelect(true);
+    const resAmt = numberInput(0, { step: "1", min: 0 });
+    const sendBtn = actionButton("送信", async () => {
+      const to = toSel.value;
+      if (!to) return;
+      sendBtn.disabled = true;
+      try {
+        await sendMail(to, { from: nation.id, fromName: nationLabel(nation), subject: subj.value || "(件名なし)", body: body.value || "", read: false });
+        const money = Math.max(0, parseInt(moneyI.value) || 0);
+        const ra = Math.max(0, parseInt(resAmt.value) || 0);
+        if (money > 0 || (resSel.value && ra > 0)) {
+          const resources = (resSel.value && ra > 0) ? { [resSel.value]: ra } : {};
+          await addOrder(nationId, "sendTransfer", { to, toName: nationName(to), money, resources });
+        }
+        subj.value = ""; body.value = ""; moneyI.value = "0"; resAmt.value = "0";
+        flash("メールを送信しました（送金/物資はターン処理で反映）。", "ok");
+      } catch (err) { flash("送信失敗: " + err.message, "err"); }
+      finally { sendBtn.disabled = false; }
+    });
+    mc.appendChild(labeled("宛先", toSel));
+    mc.appendChild(labeled("件名", subj));
+    mc.appendChild(labeled("本文", body));
+    mc.appendChild(row(labeled("送金（国庫）", moneyI), labeled("資源", resSel), labeled("資源量", resAmt)));
+    mc.appendChild(row(sendBtn));
+    mc.appendChild(noteP("本文は即時に届きます。送金・物資は予約され、ターン処理で残高を確認して送付されます。"));
+  }
+
+  // 取引提案作成
+  const tc = document.getElementById("trade-compose");
+  tc.innerHTML = "";
+  if (!otherNationOptions().length) {
+    tc.appendChild(noteP("他の国家がいません。"));
+  } else {
+    const toSel = selectInput(otherNationOptions());
+    const giveMoney = numberInput(0, { step: "1", min: 0 });
+    const giveRes = resourceSelect(true); const giveAmt = numberInput(0, { step: "1", min: 0 });
+    const wantMoney = numberInput(0, { step: "1", min: 0 });
+    const wantRes = resourceSelect(true); const wantAmt = numberInput(0, { step: "1", min: 0 });
+    const propBtn = actionButton("取引を提案", async () => {
+      const to = toSel.value; if (!to) return;
+      const give = { money: Math.max(0, parseInt(giveMoney.value) || 0), resources: {} };
+      const want = { money: Math.max(0, parseInt(wantMoney.value) || 0), resources: {} };
+      if (giveRes.value && parseInt(giveAmt.value) > 0) give.resources[giveRes.value] = parseInt(giveAmt.value);
+      if (wantRes.value && parseInt(wantAmt.value) > 0) want.resources[wantRes.value] = parseInt(wantAmt.value);
+      propBtn.disabled = true;
+      try {
+        await createTradeProposal({ from: nation.id, fromName: nationLabel(nation), to, give, want });
+        await sendMail(to, { from: nation.id, fromName: nationLabel(nation), subject: "取引の提案が届きました", body: "外交タブの提案一覧から確認してください。", read: false });
+        giveMoney.value = wantMoney.value = giveAmt.value = wantAmt.value = "0";
+        flash("取引を提案しました。", "ok");
+      } catch (err) { flash("提案失敗: " + err.message, "err"); }
+      finally { propBtn.disabled = false; }
+    });
+    tc.appendChild(labeled("相手", toSel));
+    tc.appendChild(row(labeled("渡す国庫", giveMoney), labeled("渡す資源", giveRes), labeled("量", giveAmt)));
+    tc.appendChild(row(labeled("欲しい国庫", wantMoney), labeled("欲しい資源", wantRes), labeled("量", wantAmt)));
+    tc.appendChild(row(propBtn));
+    tc.appendChild(noteP("相手が承認するとターン処理で双方の残高を確認して交換します。"));
+  }
+
+  // 掲示板作成
+  const bc = document.getElementById("board-compose");
+  bc.innerHTML = "";
+  const postI = document.createElement("input"); postI.className = "settings-input"; postI.placeholder = "掲示板に書き込む";
+  const postBtn = actionButton("投稿", async () => {
+    if (!postI.value.trim()) return;
+    postBtn.disabled = true;
+    try { await postBoard({ by: nation.id, byName: nationLabel(nation), text: postI.value.trim() }); postI.value = ""; flash("投稿しました。", "ok"); }
+    catch (err) { flash("投稿失敗: " + err.message, "err"); }
+    finally { postBtn.disabled = false; }
+  });
+  bc.appendChild(row(labeled("メッセージ", postI), postBtn));
+
+  renderMailInbox();
+  renderBoardList();
+  renderTradeList();
+}
+
+function renderMailInbox() {
+  const box = document.getElementById("mail-inbox");
+  if (!box) return;
+  if (!latestMail.length) { box.innerHTML = '<p class="loading">メールはありません。</p>'; return; }
+  box.innerHTML = "";
+  for (const m of latestMail) {
+    const item = document.createElement("div");
+    item.className = "mail-item" + (m.read ? "" : " unread");
+    const head = document.createElement("div");
+    head.className = "mail-head";
+    head.innerHTML = `<span class="mail-from">${escapeHtml(m.fromName || m.from || "?")}</span>` +
+      `<span class="mail-subj">${escapeHtml(m.subject || "(件名なし)")}</span>` +
+      `<span class="log-time">${formatTime(m.at)}</span>`;
+    const bodyEl = document.createElement("div");
+    bodyEl.className = "mail-body";
+    bodyEl.textContent = m.body || "";
+    const btns = document.createElement("div");
+    btns.className = "buttons";
+    if (!m.read) btns.appendChild(actionButton("既読", () => markMailRead(nationId, m.key).catch(() => {}), "secondary order-cancel"));
+    btns.appendChild(actionButton("削除", () => deleteMail(nationId, m.key).catch(() => {}), "secondary order-cancel"));
+    item.appendChild(head); item.appendChild(bodyEl); item.appendChild(btns);
+    box.appendChild(item);
+  }
+}
+
+function renderBoardList() {
+  const box = document.getElementById("board-list");
+  if (!box) return;
+  if (!latestBoard.length) { box.innerHTML = '<p class="loading">まだ投稿がありません。</p>'; return; }
+  box.innerHTML = "";
+  for (const p of latestBoard) {
+    const item = document.createElement("div");
+    item.className = "mail-item";
+    const head = document.createElement("div");
+    head.className = "mail-head";
+    head.innerHTML = `<span class="mail-from">${escapeHtml(p.byName || p.by || "?")}</span><span class="log-time">${formatTime(p.at)}</span>`;
+    const bodyEl = document.createElement("div");
+    bodyEl.className = "mail-body";
+    bodyEl.textContent = p.text || "";
+    item.appendChild(head); item.appendChild(bodyEl);
+    if (p.by === nation.id) {
+      const btns = document.createElement("div"); btns.className = "buttons";
+      btns.appendChild(actionButton("削除", () => deleteBoardPost(p.key).catch(() => {}), "secondary order-cancel"));
+      item.appendChild(btns);
+    }
+    box.appendChild(item);
+  }
+}
+
+function renderTradeList() {
+  const box = document.getElementById("trade-list");
+  if (!box) return;
+  const mine = latestProposals.filter((p) => p.to === nation.id || p.from === nation.id);
+  if (!mine.length) { box.innerHTML = '<p class="loading">取引提案はありません。</p>'; return; }
+  box.innerHTML = "";
+  for (const p of mine) {
+    const item = document.createElement("div");
+    item.className = "order-item";
+    const main = document.createElement("div"); main.className = "order-main";
+    const dir = p.from === nation.id ? ("→ " + nationName(p.to)) : ("← " + (p.fromName || p.from));
+    const k = document.createElement("span"); k.className = "order-kind";
+    k.textContent = dir + "（" + (p.status === "open" ? "提案中" : p.status) + "）";
+    const d = document.createElement("span"); d.className = "order-desc";
+    d.textContent = "渡す: " + transferText(p.give) + " / 欲しい: " + transferText(p.want);
+    main.appendChild(k); main.appendChild(d);
+    item.appendChild(main);
+    if (p.status === "open" && p.to === nation.id) {
+      item.appendChild(actionButton("承認", () => queue(item, "acceptTrade", { proposalId: p.key }), "order-cancel"));
+    } else if (p.from === nation.id && p.status === "open") {
+      item.appendChild(actionButton("取消", () => cancelTradeProposal(p.key).catch(() => {}), "secondary order-cancel"));
+    }
+    box.appendChild(item);
+  }
+}
+
+function transferText(t) {
+  if (!t) return "なし";
+  const parts = [];
+  if (t.money) parts.push("国庫" + t.money);
+  if (t.resources) for (const k of Object.keys(t.resources)) if (t.resources[k]) {
+    const lbl = (FLOW_RESOURCES.find((r) => r.key === k) || {}).label || k;
+    parts.push(lbl + t.resources[k]);
+  }
+  return parts.join(" / ") || "なし";
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 // -----------------------------------------------------------------------------
@@ -617,7 +911,7 @@ function statePickerControl() {
 // -----------------------------------------------------------------------------
 // 予約一覧
 // -----------------------------------------------------------------------------
-const ORDER_CONTAINERS = ["domestic-orders", "industry-orders", "economy-orders", "research-orders"];
+const ORDER_CONTAINERS = ["domestic-orders", "statepolicy-orders", "economy-orders", "research-orders"];
 function renderAllPendingOrders() {
   for (const id of ORDER_CONTAINERS) renderPendingOrders(id);
 }
@@ -684,45 +978,6 @@ function renderDomestic() {
     ? "解除すると元の経済体制に戻ります（無料）。戦時経済は軍需工場が効率↑・民需工場が効率↓、徴兵コストが下がります。"
     : "政治力250を消費して戦時経済へ移行します。解除は無料で元の体制に戻ります。"));
 
-  // 投資（対象ステートは地図タップで選ぶ）
-  const invBox = document.getElementById("invest-control");
-  invBox.innerHTML = "";
-  const states = ownStatesList();
-  if (!states.length) {
-    invBox.appendChild(noteP("自国領がありません。"));
-  } else {
-    const picker = statePickerControl();
-    const typeSel = selectInput([
-      { value: "investDevelopment", label: "開発度（国庫）" },
-      { value: "investInfrastructure", label: "インフラ（国庫）" },
-      { value: "investGovernance", label: "統治レベル（政治力）" }
-    ]);
-    const amtInput = numberInput(1, { step: "1", min: 1 });
-    const costEl = document.createElement("div");
-    costEl.className = "field-value cost-preview";
-    const updateCost = () => {
-      const s = pickedStateName ? statesData[pickedStateName] : null;
-      const kindKey = typeSel.value.replace("invest", "").toLowerCase();
-      const cur = s ? Number(s[kindKey]) || 0 : 0;
-      if (!s) { costEl.textContent = "ステート未選択"; return; }
-      const c = investCost(kindKey, cur) * (parseInt(amtInput.value) || 1);
-      costEl.textContent = "概算コスト: " + c.toLocaleString() + (kindKey === "governance" ? " 政治力" : " 国庫");
-    };
-    typeSel.addEventListener("change", updateCost);
-    amtInput.addEventListener("input", updateCost);
-    updateCost();
-    policyUpdaters.domestic = () => { picker.refresh(); updateCost(); };
-    const invBtn = actionButton("投資を予約", () => {
-      if (!pickedStateName) { switchTab("map"); flash("地図でステートをタップして選択してください。", "err"); return; }
-      const amount = Math.max(1, parseInt(amtInput.value) || 1);
-      queue(invBtn, typeSel.value, { state: pickedStateName, amount });
-    });
-    invBox.appendChild(labeled("対象ステート", picker.wrap));
-    invBox.appendChild(row(labeled("投資先", typeSel), labeled("段階数", amtInput)));
-    invBox.appendChild(row(costEl, invBtn));
-    invBox.appendChild(noteP("対象ステートは地図タブで自国領をタップして選びます。投資コストは現在のレベルが高いほど上がります。"));
-  }
-
   // 徴兵
   const conBox = document.getElementById("conscript-control");
   conBox.innerHTML = "";
@@ -742,75 +997,220 @@ function renderDomestic() {
   conBox.appendChild(row(labeled("徴兵数（予備兵）", conInput), conCost, conBtn));
   conBox.appendChild(noteP("国庫と人口を消費して予備兵を積み立てます。動員・戦闘は戦争システム側です。"));
 
+  renderAnnex();
   renderPendingOrders("domestic-orders");
+}
+
+// 編入: 地図でタップした「未所属で自国に隣接し他国に隣接しない」ステートを政治力で編入
+function annexInfo(stateName) {
+  const s = statesData[stateName];
+  if (!s) return { ok: false, reason: "ステートが見つかりません" };
+  if (s.country) return { ok: false, reason: "既に所属があります" };
+  const neighbors = adjacency[stateName] || [];
+  let adjOwn = false, adjOther = false;
+  for (const nb of neighbors) {
+    const ns = statesData[nb];
+    if (!ns || !ns.country) continue;
+    if (ns.country === nation.id) adjOwn = true; else adjOther = true;
+  }
+  if (!adjOwn) return { ok: false, reason: "自国領に隣接していません" };
+  if (adjOther) return { ok: false, reason: "他国に隣接しているため編入できません" };
+  return { ok: true, reason: "" };
+}
+
+function renderAnnex() {
+  const box = document.getElementById("annex-control");
+  box.innerHTML = "";
+  const nameEl = document.createElement("div");
+  nameEl.className = "field-value cost-preview";
+  const infoEl = document.createElement("div");
+  infoEl.className = "field-value cost-preview";
+  const pickBtn = actionButton("地図で選ぶ", () => switchTab("map"), "secondary");
+  const annexBtn = actionButton("編入を予約", () => {
+    if (!lastTappedStateName) { switchTab("map"); flash("地図で編入したいステートをタップしてください。", "err"); return; }
+    const info = annexInfo(lastTappedStateName);
+    if (!info.ok) { flash("編入不可: " + info.reason, "err"); return; }
+    queue(annexBtn, "annexState", { state: lastTappedStateName });
+  });
+  const refresh = () => {
+    const own = ownStatesList().length;
+    const cost = annexCost(own);
+    nameEl.textContent = "対象: " + (lastTappedStateName || "（地図でタップ）");
+    if (!lastTappedStateName) { infoEl.textContent = "未選択"; infoEl.className = "field-value cost-preview"; return; }
+    const info = annexInfo(lastTappedStateName);
+    infoEl.textContent = info.ok ? ("編入可能 / 政治力 " + Math.round(cost)) : ("編入不可: " + info.reason);
+    infoEl.className = "field-value cost-preview " + (info.ok ? "ok-text" : "err-text");
+  };
+  policyUpdaters.annex = refresh;
+  refresh();
+  box.appendChild(row(nameEl, pickBtn));
+  box.appendChild(row(infoEl, annexBtn));
+  box.appendChild(noteP("未所属で、自国領に隣接し、他国に隣接していないステートだけを政治力で編入できます。コストはステート数が多いほど指数的に増えます。"));
 }
 
 // -----------------------------------------------------------------------------
 // 産業タブ
 // -----------------------------------------------------------------------------
-function renderIndustry() {
-  const ctrl = document.getElementById("industry-control");
-  ctrl.innerHTML = "";
-  const states = ownStatesList();
-  if (!states.length) {
-    ctrl.appendChild(noteP("自国領がありません。"));
-  } else {
-    const picker = statePickerControl();
-    const indSel = selectInput(INDUSTRY_FIELDS.map((f) => ({ value: f.key, label: f.label })));
-    const cntInput = numberInput(1, { step: "1", min: 1 });
-    const costEl = document.createElement("div");
-    costEl.className = "field-value cost-preview";
-    const checkEl = document.createElement("div");
-    checkEl.className = "field-value cost-preview";
-    const buildBtn = actionButton("建設を予約", () => {
-      if (!pickedStateName) { switchTab("map"); flash("地図でステートをタップして選択してください。", "err"); return; }
-      const count = Math.max(1, parseInt(cntInput.value) || 1);
-      queue(buildBtn, "buildIndustry", { state: pickedStateName, industry: indSel.value, count });
-    });
-    const demoBtn = actionButton("解体を予約", () => {
-      if (!pickedStateName) { switchTab("map"); flash("地図でステートをタップして選択してください。", "err"); return; }
-      const count = Math.max(1, parseInt(cntInput.value) || 1);
-      queue(demoBtn, "demolishIndustry", { state: pickedStateName, industry: indSel.value, count });
-    }, "secondary");
-    const updateBuild = () => {
-      const count = Math.max(1, parseInt(cntInput.value) || 1);
-      const c = buildCost(indSel.value, count);
-      let txt = "国庫 " + c.treasury.toLocaleString();
-      if (c.parts) txt += " / 部品 " + c.parts;
-      if (c.machinery) txt += " / 機械 " + c.machinery;
-      costEl.textContent = txt;
-      const s = pickedStateName ? statesData[pickedStateName] : null;
-      if (!s) { checkEl.textContent = "ステート未選択"; checkEl.className = "field-value cost-preview"; buildBtn.disabled = false; return; }
-      const res = canBuildIndustry(indSel.value, s, nation, count);
-      checkEl.textContent = res.ok ? "建設可能（ターン処理時に最終判定）" : ("建設不可: " + res.reason);
-      checkEl.className = "field-value cost-preview " + (res.ok ? "ok-text" : "err-text");
-    };
-    indSel.addEventListener("change", updateBuild);
-    cntInput.addEventListener("input", updateBuild);
-    updateBuild();
-    policyUpdaters.industry = () => { picker.refresh(); updateBuild(); };
-    ctrl.appendChild(labeled("対象ステート", picker.wrap));
-    ctrl.appendChild(row(labeled("産業", indSel), labeled("数", cntInput)));
-    ctrl.appendChild(row(costEl));
-    ctrl.appendChild(row(checkEl));
-    ctrl.appendChild(row(buildBtn, demoBtn));
-    ctrl.appendChild(noteP("対象ステートは地図タブで自国領をタップして選びます。建設可否は鉱山・農場系の埋蔵量と、民間産業のイデオロギー制限のみ。人口・開発度・インフラは建設の可否ではなく稼働効率に影響します。民間産業は計画経済/企業統治経済/戦時経済のみ建設でき、それ以外では自然拡大します。解体は国庫の戻りなし。"));
-  }
+// -----------------------------------------------------------------------------
+// ステート政策タブ（ステート選択 → 投資・建設・解体・産業集計を1ページで）
+// -----------------------------------------------------------------------------
+function renderStatePolicy() {
+  renderStateCards();
+  renderSpSelected();
+  renderSpInvest();
+  renderSpIndustry();
+  renderSpSummary();
+  renderPendingOrders("statepolicy-orders");
+  // 地図タップ・カードタップどちらでも同じ更新関数で再描画
+  policyUpdaters.statepolicy = () => {
+    renderStateCards();
+    renderSpSelected();
+    renderSpInvest();
+    renderSpIndustry();
+    renderSpSummary();
+  };
+}
 
-  // 集計表
-  const sum = document.getElementById("industry-summary");
-  sum.innerHTML = "";
-  const totals = {};
-  for (const f of INDUSTRY_FIELDS) totals[f.key] = 0;
-  for (const s of states) {
-    for (const f of INDUSTRY_FIELDS) totals[f.key] += Number(s.industries && s.industries[f.key]) || 0;
+function renderStateCards() {
+  const box = document.getElementById("state-cards");
+  if (!box) return;
+  box.innerHTML = "";
+  const own = ownStatesList();
+  if (!own.length) { box.appendChild(noteP("自国領がありません。")); return; }
+  for (const s of own) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "state-card" + (s.name === pickedStateName ? " active" : "");
+    card.addEventListener("click", () => pickState(s.name));
+    const sw = document.createElement("span");
+    sw.className = "state-card-color";
+    sw.style.background = nation.color || "#5aa9ff";
+    const head = document.createElement("div");
+    head.className = "state-card-name";
+    head.textContent = s.name;
+    const stats = document.createElement("div");
+    stats.className = "state-card-stats";
+    stats.textContent =
+      `経済 ${fmt(Number(s.economy) || 0)} / 開発 ${fmt(Number(s.development) || 0)} / インフラ ${fmt(Number(s.infrastructure) || 0)} / 人口 ${fmt(Number(s.population) || 0)}`;
+    card.appendChild(sw);
+    card.appendChild(head);
+    card.appendChild(stats);
+    box.appendChild(card);
   }
+}
+
+function renderSpSelected() {
+  const box = document.getElementById("sp-selected");
+  if (!box) return;
+  box.innerHTML = "";
+  const s = pickedStateName ? statesData[pickedStateName] : null;
+  if (!s) { box.appendChild(noteP("カードをタップ、または地図タブで自国領をタップしてください。")); return; }
+  const head = document.createElement("h3");
+  head.className = "state-info-name";
+  head.textContent = pickedStateName;
+  box.appendChild(head);
   const grid = document.createElement("div");
   grid.className = "field-grid";
-  for (const f of INDUSTRY_FIELDS) grid.appendChild(roField(f.label, fmt(totals[f.key])));
-  sum.appendChild(grid);
+  const fields = [
+    ["経済力", s.economy], ["開発度", s.development], ["インフラ", s.infrastructure],
+    ["統治レベル", s.governance], ["人口", s.population], ["生活水準", s.livingStandard]
+  ];
+  for (const [lbl, v] of fields) grid.appendChild(roField(lbl, fmt(Number(v) || 0)));
+  box.appendChild(grid);
+  // 資源の埋蔵（有無のみ）
+  const resHead = document.createElement("h4"); resHead.className = "subhead"; resHead.textContent = "資源の埋蔵（有無）";
+  box.appendChild(resHead);
+  const resGrid = document.createElement("div"); resGrid.className = "field-grid";
+  const resList = [["fertility", "肥沃度"], ["metal", "金属"], ["oil", "石油"], ["coal", "石炭"], ["rareMineral", "重要鉱物"]];
+  for (const [k, lbl] of resList) {
+    const has = Number(s.resources && s.resources[k]) > 0;
+    resGrid.appendChild(roField(lbl, has ? "あり" : "なし"));
+  }
+  box.appendChild(resGrid);
+}
 
-  renderPendingOrders("industry-orders");
+function renderSpInvest() {
+  const box = document.getElementById("sp-invest");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!pickedStateName) { box.appendChild(noteP("ステート未選択")); return; }
+  const typeSel = selectInput([
+    { value: "investDevelopment", label: "開発度（国庫）" },
+    { value: "investInfrastructure", label: "インフラ（国庫）" },
+    { value: "investGovernance", label: "統治レベル（政治力）" }
+  ]);
+  const amtInput = numberInput(1, { step: "1", min: 1 });
+  const costEl = document.createElement("div");
+  costEl.className = "field-value cost-preview";
+  const update = () => {
+    const s = statesData[pickedStateName];
+    const kindKey = typeSel.value.replace("invest", "").toLowerCase();
+    const cur = s ? Number(s[kindKey]) || 0 : 0;
+    const c = investCost(kindKey, cur) * (parseInt(amtInput.value) || 1);
+    costEl.textContent = "概算コスト: " + c.toLocaleString() + (kindKey === "governance" ? " 政治力" : " 国庫");
+  };
+  typeSel.addEventListener("change", update);
+  amtInput.addEventListener("input", update);
+  update();
+  const invBtn = actionButton("投資を予約", () => {
+    const amount = Math.max(1, parseInt(amtInput.value) || 1);
+    queue(invBtn, typeSel.value, { state: pickedStateName, amount });
+  });
+  box.appendChild(row(labeled("投資先", typeSel), labeled("段階数", amtInput)));
+  box.appendChild(row(costEl, invBtn));
+  box.appendChild(noteP("コストは現在のレベルが+1上がるごとに増えます。"));
+}
+
+function renderSpIndustry() {
+  const box = document.getElementById("sp-industry");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!pickedStateName) { box.appendChild(noteP("ステート未選択")); return; }
+  const indSel = selectInput(INDUSTRY_FIELDS.map((f) => ({ value: f.key, label: f.label })));
+  const cntInput = numberInput(1, { step: "1", min: 1 });
+  const costEl = document.createElement("div"); costEl.className = "field-value cost-preview";
+  const checkEl = document.createElement("div"); checkEl.className = "field-value cost-preview";
+  const update = () => {
+    const count = Math.max(1, parseInt(cntInput.value) || 1);
+    const c = buildCost(indSel.value, count);
+    let txt = "国庫 " + c.treasury.toLocaleString();
+    if (c.parts) txt += " / 部品 " + c.parts;
+    if (c.machinery) txt += " / 機械 " + c.machinery;
+    costEl.textContent = txt;
+    const s = statesData[pickedStateName];
+    const res = canBuildIndustry(indSel.value, s, nation, count);
+    checkEl.textContent = res.ok ? "建設可能（ターン処理時に最終判定）" : ("建設不可: " + res.reason);
+    checkEl.className = "field-value cost-preview " + (res.ok ? "ok-text" : "err-text");
+  };
+  indSel.addEventListener("change", update);
+  cntInput.addEventListener("input", update);
+  update();
+  const buildBtn = actionButton("建設を予約", () => {
+    const count = Math.max(1, parseInt(cntInput.value) || 1);
+    queue(buildBtn, "buildIndustry", { state: pickedStateName, industry: indSel.value, count });
+  });
+  const demoBtn = actionButton("解体を予約", () => {
+    const count = Math.max(1, parseInt(cntInput.value) || 1);
+    queue(demoBtn, "demolishIndustry", { state: pickedStateName, industry: indSel.value, count });
+  }, "secondary");
+  box.appendChild(row(labeled("産業", indSel), labeled("数", cntInput)));
+  box.appendChild(row(costEl));
+  box.appendChild(row(checkEl));
+  box.appendChild(row(buildBtn, demoBtn));
+  box.appendChild(noteP("建設可否は鉱山・農場系の埋蔵量と、民間産業のイデオロギー制限のみ。人口・開発度・インフラは稼働効率に影響します。"));
+}
+
+function renderSpSummary() {
+  const box = document.getElementById("sp-summary");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!pickedStateName) { box.appendChild(noteP("ステート未選択")); return; }
+  const s = statesData[pickedStateName] || {};
+  const inds = s.industries || {};
+  const grid = document.createElement("div");
+  grid.className = "field-grid";
+  for (const f of INDUSTRY_FIELDS) grid.appendChild(roField(f.label, fmt(Number(inds[f.key]) || 0)));
+  box.appendChild(grid);
 }
 
 // -----------------------------------------------------------------------------

@@ -124,7 +124,11 @@ function CONFIG_() {
     taxChangePP: 10, conscriptCostPerUnit: 2, conscriptPopPerUnit: 1,
     researchUniBase: 5, popGrowthMax: 0.05, deficitGovernancePenalty: 2,
     civilianDecayBase: 30, civilianExpandPopPer: 200, popPerCivilian: 50,
-    ppIncomeBase: 10, randomness: 0.1
+    ppIncomeBase: 10, randomness: 0.1,
+    passiveGrowthPerTrend: 0.001,
+    stateUpkeepBase: 10, stateUpkeepExp: 1.6,
+    statePpUpkeepBase: 0.5, statePpUpkeepExp: 1.4,
+    annexBasePP: 50, annexExp: 1.5
   };
   try {
     var sh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Config");
@@ -264,9 +268,13 @@ function runTurn() {
     var world = stepWorld_(fbGet_(ROOT + "/world") || defaultWorld_());
     var market = fbGet_(ROOT + "/market") || { prices: {}, offers: [] };
     if (!market.offers) market.offers = [];
+    var mapData = fbGet_(ROOT + "/map") || {};
+    var adjacency = mapData.adjacency || {};
+    var proposals = fbGet_(ROOT + "/tradeProposals") || {};
 
     var processedOrderPaths = []; // 後で個別 DELETE するキー
     var tradeVolumeByNation = {};
+    var ctx = { adjacency: adjacency, proposals: proposals, cfg: cfg, tradeVol: tradeVolumeByNation };
 
     // --- 各国の予約を処理 ---
     Object.keys(nations).forEach(function (nid) {
@@ -279,13 +287,16 @@ function runTurn() {
         var o = orders[oid];
         if (!o || !o.kind) return;
         try {
-          processOrder_(o, n, nid, nations, states, market, cfg, tradeVolumeByNation);
+          processOrder_(o, n, nid, nations, states, market, cfg, tradeVolumeByNation, ctx);
         } catch (e) {
           n.logs.push({ at: Date.now(), kind: "turn", text: "予約処理エラー: " + o.kind });
         }
         processedOrderPaths.push(ROOT + "/nations/" + nid + "/orders/" + oid);
       });
     });
+
+    // 取引提案の状態変化を書き戻す
+    fbPut_(ROOT + "/tradeProposals", proposals);
 
     // --- 経済（産業稼働・税収・研究・人口） ---
     Object.keys(nations).forEach(function (nid) {
@@ -327,7 +338,14 @@ function ownStates_(nid, states) {
   return arr;
 }
 
-function processOrder_(o, n, nid, nations, states, market, cfg, tradeVol) {
+// メールを相手の受信箱に配信する（append-only キー）。
+function deliverMail_(toId, mail) {
+  var key = "ml_" + Date.now().toString(36) + "_" + Math.floor(Math.random() * 1e6).toString(36);
+  mail.at = Date.now();
+  fbPut_(ROOT + "/nations/" + toId + "/mail/" + key, mail);
+}
+
+function processOrder_(o, n, nid, nations, states, market, cfg, tradeVol, ctx) {
   var p = o.payload || {};
   var kind = o.kind;
   if (kind === "setTaxRate") {
@@ -417,7 +435,92 @@ function processOrder_(o, n, nid, nations, states, market, cfg, tradeVol) {
     market.offers = market.offers.filter(function (off) { return !(off.id === p.offerId && off.by === nid); });
   } else if (kind === "tradeAccept") {
     settleTrade_(p.offerId, nid, n, nations, market, tradeVol);
+  } else if (kind === "annexState") {
+    annexState_(p.state, n, nid, states, ctx.adjacency, cfg);
+  } else if (kind === "sendTransfer") {
+    sendTransfer_(p, n, nid, nations);
+  } else if (kind === "acceptTrade") {
+    acceptTrade_(p.proposalId, n, nid, nations, ctx.proposals);
   }
+}
+
+// 編入: 未所属で、自国領に隣接し、他国に隣接していないステートを政治力で編入する。
+function annexState_(stateName, n, nid, states, adjacency, cfg) {
+  var st = states[stateName];
+  if (!st) return;
+  if (st.country) { n.logs.push({ at: Date.now(), kind: "policy", text: "編入失敗(所属あり): " + stateName }); return; }
+  var neighbors = adjacency[stateName] || [];
+  var adjOwn = false, adjOther = false;
+  for (var i = 0; i < neighbors.length; i++) {
+    var ns = states[neighbors[i]];
+    if (!ns || !ns.country) continue;
+    if (ns.country === nid) adjOwn = true;
+    else adjOther = true;
+  }
+  if (!adjOwn) { n.logs.push({ at: Date.now(), kind: "policy", text: "編入失敗(自国に隣接せず): " + stateName }); return; }
+  if (adjOther) { n.logs.push({ at: Date.now(), kind: "policy", text: "編入失敗(他国に隣接): " + stateName }); return; }
+  // コスト = 基礎 × (現ステート数+1)^指数
+  var sc = 0;
+  Object.keys(states).forEach(function (k) { if (states[k] && states[k].country === nid) sc++; });
+  var cost = cfg.annexBasePP * Math.pow(sc + 1, cfg.annexExp);
+  if ((n.stats.politicalPower || 0) < cost) { n.logs.push({ at: Date.now(), kind: "policy", text: "編入失敗(政治力不足): " + stateName }); return; }
+  n.stats.politicalPower -= cost;
+  st.country = nid;
+  n.logs.push({ at: Date.now(), kind: "policy", text: stateName + " を編入（政治力 " + Math.round(cost) + " 消費）" });
+}
+
+// 送金・物資送付: 自国の国庫/在庫から相手へ移す。足りなければ送れる分だけ。
+function sendTransfer_(p, n, nid, nations) {
+  var to = nations[p.to];
+  if (!to || p.to === nid) return;
+  if (!to.stats) to.stats = {};
+  var stockFrom = ensureStock_(n), stockTo = ensureStock_(to);
+  var sentParts = [];
+  var money = Math.max(0, Number(p.money) || 0);
+  if (money > 0) {
+    var amt = Math.min(money, n.stats.treasury || 0);
+    if (amt > 0) { n.stats.treasury -= amt; to.stats.treasury = (to.stats.treasury || 0) + amt; sentParts.push("国庫" + Math.round(amt)); }
+  }
+  if (p.resources) {
+    Object.keys(p.resources).forEach(function (k) {
+      var want = Math.max(0, Number(p.resources[k]) || 0);
+      var give = Math.min(want, stockFrom[k] || 0);
+      if (give > 0) { stockFrom[k] -= give; stockTo[k] = (stockTo[k] || 0) + give; sentParts.push(k + Math.round(give)); }
+    });
+  }
+  if (!sentParts.length) { n.logs.push({ at: Date.now(), kind: "diplo", text: "送付失敗(残高不足): " + (to.name || p.to) }); return; }
+  n.logs.push({ at: Date.now(), kind: "diplo", text: (to.name || p.to) + " へ送付: " + sentParts.join(" / ") });
+  deliverMail_(p.to, { from: nid, fromName: n.name || nid, subject: "送付を受領しました", body: (n.name || nid) + " から受け取りました: " + sentParts.join(" / "), read: false });
+}
+
+// 取引提案の承認: 提案者の give と承認者の want を交換（双方の残高を確認）。
+function acceptTrade_(pid, n, nid, nations, proposals) {
+  var pr = proposals[pid];
+  if (!pr || pr.status !== "open") return;
+  if (pr.to && pr.to !== nid) return;
+  var proposer = nations[pr.from];
+  if (!proposer) return;
+  var give = pr.give || {}, want = pr.want || {};
+  var pStock = ensureStock_(proposer), aStock = ensureStock_(n);
+  // 残高チェック
+  if ((proposer.stats.treasury || 0) < (Number(give.money) || 0)) { pr.status = "failed"; return; }
+  if ((n.stats.treasury || 0) < (Number(want.money) || 0)) { pr.status = "failed"; return; }
+  var ok = true;
+  if (give.resources) Object.keys(give.resources).forEach(function (k) { if ((pStock[k] || 0) < (Number(give.resources[k]) || 0)) ok = false; });
+  if (want.resources) Object.keys(want.resources).forEach(function (k) { if ((aStock[k] || 0) < (Number(want.resources[k]) || 0)) ok = false; });
+  if (!ok) { pr.status = "failed"; return; }
+  // 交換実行: proposer→accepter(give), accepter→proposer(want)
+  var gm = Number(give.money) || 0, wm = Number(want.money) || 0;
+  proposer.stats.treasury -= gm; n.stats.treasury = (n.stats.treasury || 0) + gm;
+  n.stats.treasury -= wm; proposer.stats.treasury += wm;
+  if (give.resources) Object.keys(give.resources).forEach(function (k) { var v = Number(give.resources[k]) || 0; pStock[k] -= v; aStock[k] = (aStock[k] || 0) + v; });
+  if (want.resources) Object.keys(want.resources).forEach(function (k) { var v = Number(want.resources[k]) || 0; aStock[k] -= v; pStock[k] = (pStock[k] || 0) + v; });
+  pr.status = "done";
+  var msg = "取引が成立しました（" + (proposer.name || pr.from) + " ⇄ " + (n.name || nid) + "）";
+  n.logs.push({ at: Date.now(), kind: "trade", text: msg });
+  if (!proposer.logs) proposer.logs = [];
+  proposer.logs.push({ at: Date.now(), kind: "trade", text: msg });
+  deliverMail_(pr.from, { from: nid, fromName: n.name || nid, subject: "取引が成立しました", body: (n.name || nid) + " があなたの取引提案を承認しました。", read: false });
 }
 
 function reducePopulation_(nid, states, amount) {
@@ -550,6 +653,13 @@ function applyEconomy_(n, nid, states, world, cfg, tradeVolume) {
   // 政治力の毎ターン収入（政体補正）
   n.stats.politicalPower = (Number(n.stats.politicalPower) || 0) + cfg.ppIncomeBase * polEff_(gov).ppIncome;
 
+  // ステート数による維持費（指数的に逓増。国庫と政治力を消費）
+  var sc = own.length;
+  var upT = cfg.stateUpkeepBase * Math.pow(sc, cfg.stateUpkeepExp);
+  var upP = cfg.statePpUpkeepBase * Math.pow(sc, cfg.statePpUpkeepExp);
+  n.stats.treasury = (n.stats.treasury || 0) - upT;
+  n.stats.politicalPower = (Number(n.stats.politicalPower) || 0) - upP;
+
   // 研究（大学からの研究ポイントを配分。イデオロギー補正）
   researchOutput *= ecoEff_(eco).research * polEff_(gov).research;
   var alloc = n.research.allocation || { industrial: 0.5, military: 0.5 };
@@ -558,8 +668,10 @@ function applyEconomy_(n, nid, states, world, cfg, tradeVolume) {
   rollResearchUpgrade_(n);
 
   // 経済力をステートに反映（消費された資源＝充足率に比例して発展。純経済で増減）
+  // 景気が0以上なら何もしなくても自然増加する。
+  var passive = trend >= 0 ? trend * cfg.passiveGrowthPerTrend : 0;
   own.forEach(function (o) {
-    var growth = satisfyRatio * 0.02;
+    var growth = satisfyRatio * 0.02 + passive;
     o.s.economy = (Number(o.s.economy) || 0) * (1 + growth) + (netEconomy / Math.max(1, own.length)) * 0.01;
     if (o.s.economy < 0) o.s.economy = 0;
     totalEconomy += o.s.economy;
@@ -696,17 +808,46 @@ function getBackup(dateStr) {
 function doGet(e) {
   var p = e.parameter || {};
   if (p.key !== apiKey_()) return json_({ error: "unauthorized" });
+  if (p.action === "runturn") { runTurn(); return json_({ ok: true, ran: "runTurn" }); }
+  if (p.action === "runbackup") { backupToSheets(); return json_({ ok: true, ran: "backupToSheets" }); }
   if (p.action === "backup") return json_(getBackup(p.date) || {});
+  if (p.action === "getconfig") return json_(readConfigSheet_());
   if (p.path) return json_(fbGet_(p.path.replace(/^\//, "")) || {});
-  return json_({ ok: true, hint: "use ?path= or ?action=backup with key" });
+  return json_({ ok: true, hint: "use ?path= / ?action=runturn|runbackup|backup|getconfig with key" });
 }
 function doPost(e) {
   var body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json_({ error: "bad json" }); }
   if (!body || body.key !== apiKey_()) return json_({ error: "unauthorized" });
+  if (body.action === "setconfig") { writeConfigSheet_(body.config || {}); return json_({ ok: true, set: "config" }); }
   if (!body.path) return json_({ error: "path required" });
   fbPut_(body.path.replace(/^\//, ""), body.value);
   return json_({ ok: true, path: body.path });
+}
+
+// Config シート（計算式の調整）を key/value で読み書きする。
+function readConfigSheet_() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sh = ss.getSheetByName("Config");
+  var defaults = CONFIG_();
+  if (!sh) {
+    sh = ss.insertSheet("Config");
+    sh.appendRow(["key", "value"]);
+    Object.keys(defaults).forEach(function (k) { sh.appendRow([k, defaults[k]]); });
+    return defaults;
+  }
+  var rows = sh.getDataRange().getValues(), out = {};
+  for (var i = 1; i < rows.length; i++) if (rows[i][0]) out[rows[i][0]] = rows[i][1];
+  // 未登録のキーはデフォルトで補完
+  Object.keys(defaults).forEach(function (k) { if (!(k in out)) out[k] = defaults[k]; });
+  return out;
+}
+function writeConfigSheet_(config) {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sh = ss.getSheetByName("Config") || ss.insertSheet("Config");
+  sh.clear();
+  sh.appendRow(["key", "value"]);
+  Object.keys(config).forEach(function (k) { sh.appendRow([k, config[k]]); });
 }
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);

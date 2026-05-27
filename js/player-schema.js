@@ -61,6 +61,30 @@ export const ORDER_KINDS = {
     cost: "移行は政治力250 / 解除は無料",
     describe: (p) => (p.on ? "戦時経済へ移行（政治力250）" : "戦時経済を解除（元の経済体制へ）")
   },
+  annexState: {
+    label: "ステートの編入",
+    cost: "政治力（ステート数で逓増）",
+    describe: (p) => `${p.state} を編入`
+  },
+  sendTransfer: {
+    label: "送金・物資の送付",
+    cost: "送る分の国庫・在庫",
+    describe: (p) => {
+      const parts = [];
+      if (p.money) parts.push(`国庫 ${num(p.money)}`);
+      if (p.resources) {
+        for (const k of Object.keys(p.resources)) {
+          if (p.resources[k]) parts.push(`${resourceLabel(k)} ${num(p.resources[k])}`);
+        }
+      }
+      return `${p.toName || p.to} へ ${parts.join(" / ") || "（なし）"} を送付`;
+    }
+  },
+  acceptTrade: {
+    label: "取引提案の承認",
+    cost: "提案条件に従う",
+    describe: (p) => `取引提案 ${p.proposalId} を承認`
+  },
   tradeOffer: {
     label: "市場オファー",
     cost: "成立時に決済",
@@ -147,8 +171,9 @@ const INDUSTRY_LABELS = {
   machineryFactory: "機械工場", rareMineralMine: "重要鉱物鉱山", university: "大学"
 };
 const RESOURCE_LABELS = {
-  metal: "金属資源", oil: "石油燃料", coal: "石炭燃料",
-  rareMineral: "重要鉱物資源", food: "食料資源"
+  consumerGoods: "民需資源", militaryGoods: "軍需資源", metal: "金属資源",
+  heavyGoods: "工業製品", oil: "石油燃料", coal: "石炭燃料", food: "食料資源",
+  parts: "工業部品", machinery: "機械製品", rareMineral: "重要鉱物資源"
 };
 
 function industryLabel(k) { return INDUSTRY_LABELS[k] || k; }

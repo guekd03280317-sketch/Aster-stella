@@ -358,16 +358,22 @@ function select(name) {
 // -----------------------------------------------------------------------------
 // ランダム配置
 // -----------------------------------------------------------------------------
-function doRandomPlacement() {
+async function doRandomPlacement() {
   ensureStateEntries();
   const oilSpotCount = parseInt(document.getElementById("oil-spot-count").value || "3", 10);
   const oilLowProb = (parseFloat(document.getElementById("oil-low-prob").value || "5") || 0) / 100;
   const btn = document.getElementById("btn-random");
   btn.disabled = true;
   setStatus(randomStatus, "配置中...", "");
+  // 運営ページで設定した資源配分(aster_stella/config/resourceDist)があれば反映
+  let dist = null;
+  try {
+    const snap = await get(ref(db, "aster_stella/config/resourceDist"));
+    if (snap.exists()) dist = snap.val();
+  } catch (_) { /* デフォルト配分で続行 */ }
   requestAnimationFrame(() => {
     try {
-      const result = placeResources(statesData, adjacency, { oilSpotCount, oilLowProb });
+      const result = placeResources(statesData, adjacency, { oilSpotCount, oilLowProb, dist });
       setStatus(
         randomStatus,
         "資源をランダム配置しました。\n油田スポット: " +

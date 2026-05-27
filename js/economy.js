@@ -111,8 +111,31 @@ export const CONFIG = {
   civilianDecayBase: 30,     // 民間産業1棟・景気-1あたりの経済減衰
   civilianExpandPopPer: 200, // 民間産業1棟が自然拡大するのに必要な余剰人口の目安
   randomness: 0.1,
-  popPerCivilian: 50         // 民間産業1棟あたりの想定人口（自然拡大の余力判定用）
+  popPerCivilian: 50,        // 民間産業1棟あたりの想定人口（自然拡大の余力判定用）
+  passiveGrowthPerTrend: 0.001, // 景気>=0のとき 景気×この値 だけ毎ターン経済が自然増加
+  ppIncomeBase: 10,          // 政治力の毎ターン基礎収入
+  stateUpkeepBase: 10,       // ステート数に対する国庫維持費の基礎
+  stateUpkeepExp: 1.6,       // 国庫維持費の指数（ステート数^exp）
+  statePpUpkeepBase: 0.5,    // ステート数に対する政治力維持費の基礎
+  statePpUpkeepExp: 1.4,     // 政治力維持費の指数
+  annexBasePP: 50,           // 編入の基礎政治力コスト
+  annexExp: 1.5              // 編入コストの指数（現ステート数^exp）
 };
+
+// ステート数による維持費（指数的＝べき乗で逓増）。
+export function stateUpkeep(stateCount) {
+  const c = Math.max(0, Number(stateCount) || 0);
+  return {
+    treasury: CONFIG.stateUpkeepBase * Math.pow(c, CONFIG.stateUpkeepExp),
+    politicalPower: CONFIG.statePpUpkeepBase * Math.pow(c, CONFIG.statePpUpkeepExp)
+  };
+}
+
+// 編入(annex)の政治力コスト（現在のステート数が多いほど指数的に高い）。
+export function annexCost(currentStateCount) {
+  const c = Math.max(0, Number(currentStateCount) || 0);
+  return CONFIG.annexBasePP * Math.pow(c + 1, CONFIG.annexExp);
+}
 
 // 産業ごとの建設コスト。treasury(国庫)に加えて、必要に応じて在庫の parts/machinery を消費する。
 export const BUILD_COSTS = {

@@ -167,6 +167,7 @@ export function defaultNation(opts = {}) {
   n.treaties = [];
   n.logs = [];
   n.orders = {};
+  n.mail = {};
   return n;
 }
 
@@ -198,6 +199,8 @@ export function normalizeNation(input) {
   // 配列まるごと上書きすると予約が競合で消えるため、子ノード単位で読み書きする。
   // 旧データが配列だった場合も id キーのオブジェクトへ寄せて保持する。
   base.orders = normalizeOrders(input.orders);
+  // mail は受信箱（キー付きオブジェクト）。管理者保存で消さないよう保持する。
+  base.mail = (input.mail && typeof input.mail === "object") ? input.mail : {};
   return base;
 }
 
