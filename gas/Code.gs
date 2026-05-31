@@ -303,6 +303,18 @@ function runTurn() {
       applyEconomy_(nations[nid], nid, states, world, cfg, tradeVolumeByNation[nid] || 0);
     });
 
+    // --- 戦争システム（§7）: 経済の後に補給→消費→充足率→戦闘解決 ---
+    var wars = fbGet_(ROOT + "/wars") || {};
+    try {
+      var warCfg = WAR_CONFIG_();
+      Object.keys(nations).forEach(function (nid) {
+        applyMilitary_(nations[nid], nid, states, adjacency, warCfg);
+      });
+      simulateWar_(nations, states, adjacency, wars, warCfg);
+    } catch (warErr) {
+      Logger.log("戦争処理エラー: " + warErr);
+    }
+
     // --- 市場価格の統計更新（成立価格の指数移動平均的な更新） ---
     updateMarketPrices_(market);
 
@@ -311,14 +323,18 @@ function runTurn() {
       var n = nations[nid];
       n.logs = (n.logs || []).slice(-100);
       // orders には触れない（処理済みキーだけ後で個別削除）
-      fbPatch_(ROOT + "/nations/" + nid, {
+      var patch = {
         stats: n.stats, research: n.research, logs: n.logs, stockpile: ensureStock_(n),
         ideology: n.ideology || "", prevIdeology: n.prevIdeology || ""
-      });
+      };
+      // 軍ツリーは戦争システムが変更するので一緒に書き戻す
+      if (n.military) patch.military = n.military;
+      fbPatch_(ROOT + "/nations/" + nid, patch);
     });
     fbPut_(ROOT + "/states", states);
     fbPut_(ROOT + "/world", world);
     fbPut_(ROOT + "/market", market);
+    fbPut_(ROOT + "/wars", wars);
 
     // 処理済み予約だけ削除
     processedOrderPaths.forEach(function (p) { fbDelete_(p); });
@@ -441,6 +457,9 @@ function processOrder_(o, n, nid, nations, states, market, cfg, tradeVol, ctx) {
     sendTransfer_(p, n, nid, nations);
   } else if (kind === "acceptTrade") {
     acceptTrade_(p.proposalId, n, nid, nations, ctx.proposals);
+  } else if (WAR_ORDER_KINDS_[kind]) {
+    // 戦争システムの予約は War.gs に委譲（mobilize/assign/move/attack/defend/宣戦/講和など）
+    processWarOrder_(o, n, nid, nations, states, ctx);
   }
 }
 

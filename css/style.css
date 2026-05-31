@@ -754,6 +754,43 @@ textarea.nation-description {
 .state-card-name { font-size: 0.95rem; color: var(--accent-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .state-card-stats { font-size: 0.78rem; color: var(--muted); }
 
+/* ステート一覧の開閉（ステート政策タブ） */
+.state-cards-details { margin-top: 10px; }
+.state-cards-details > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(40, 50, 74, 0.4);
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-tap-highlight-color: transparent;
+}
+.state-cards-details > summary::-webkit-details-marker { display: none; }
+.state-cards-details > summary::before {
+  content: "";
+  display: inline-block;
+  border-style: solid;
+  border-width: 6px 5px 0 5px;
+  border-color: var(--accent) transparent transparent transparent;
+  transform: rotate(-90deg);
+  transition: transform 0.18s ease;
+}
+.state-cards-details[open] > summary::before { transform: rotate(0deg); }
+.state-cards-details > summary:hover { border-color: var(--border-strong); }
+
+/* ステート政策タブの地図はメイン地図より少し小さめに */
+#policy-map-container {
+  min-height: 36vh;
+  max-height: 58vh;
+}
+
 /* ステートピッカー（地図から選択） */
 .state-picker {
   display: flex;
@@ -894,3 +931,49 @@ button.force-turn.loading {
 
 /* テキスト選択 */
 ::selection { background: rgba(90, 169, 255, 0.35); color: #ffffff; }
+
+/* =====================================================================
+   軍事タブ（戦争システム）
+   ===================================================================== */
+
+/* 地図前面の Canvas 演出レイヤー（§24）。SVGの上に重ねる */
+.map-container.war-map { position: relative; }
+.war-fx-canvas { position: absolute; left: 0; top: 0; z-index: 2; }
+
+/* モードツールバー */
+#mil-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.mode-btn {
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--border-strong); border-radius: 10px;
+  padding: 8px 12px; font-size: 0.86rem; cursor: pointer; min-height: 40px;
+}
+.mode-btn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+.mode-btn.secondary { background: transparent; color: var(--muted); }
+
+/* 軍カード */
+.mil-army-card {
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; margin: 8px 0; background: rgba(255, 255, 255, 0.02);
+}
+.mil-army-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(90, 169, 255, 0.4); }
+.mil-army-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mil-army-head strong { font-size: 0.98rem; }
+.mil-army-loc { color: var(--muted); font-size: 0.82rem; }
+.mil-army-mode {
+  margin-left: auto; font-size: 0.76rem; color: var(--accent);
+  border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 9px;
+}
+.mil-army-comp { color: var(--muted); font-size: 0.84rem; margin: 6px 0; }
+
+/* ステータスバー（AP/補給/士気） */
+.mil-bar { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.mil-bar-label { width: 3.2em; font-size: 0.78rem; color: var(--muted); flex: 0 0 auto; }
+.mil-bar-track {
+  flex: 1 1 auto; height: 8px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07); overflow: hidden;
+}
+.mil-bar-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.4s ease; }
+
+/* 参謀の警告表示 */
+.field-value.warn { color: #ffcf66; }
+

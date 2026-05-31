@@ -12,6 +12,8 @@
 //   これにより複数プレイヤーが同時に操作しても上書きで消えない
 //   （各国家は自分の orders 配下にだけ書き込むため衝突しない）。
 
+import { SPECIAL_UNITS_BY_ID } from "./war-schema.js";
+
 // ---- 予約操作(order)の種別 ----
 // kind ごとに UI ラベルと、予約一覧に表示する説明文を定義する。
 // payload の中身は各タブが組み立てる。
@@ -100,6 +102,63 @@ export const ORDER_KINDS = {
     label: "オファー取消",
     cost: "なし",
     describe: (p) => `オファー ${p.offerId} を取消`
+  },
+
+  // ---- 戦争システム（§5.2）----
+  createArmy: {
+    label: "軍の編成",
+    cost: "なし",
+    describe: (p) => `${p.state || ""} に新しい軍「${p.name || "新編軍"}」を編成`
+  },
+  mobilize: {
+    label: "動員",
+    cost: "軍需ほか",
+    describe: (p) => `${p.state} の予備兵 ${num(p.amount)} を ${unitLabel(p.kind)} として動員`
+  },
+  assignTroops: {
+    label: "軍へ配備",
+    cost: "なし",
+    describe: (p) => `${unitLabel(p.kind)} ${num(p.amount)} を ${p.armyName || p.armyId} へ配備`
+  },
+  demobilize: {
+    label: "復員",
+    cost: "なし",
+    describe: (p) => `${p.armyName || p.armyId} の ${unitLabel(p.kind)} ${num(p.amount)} を予備兵へ`
+  },
+  moveArmy: {
+    label: "軍の移動",
+    cost: "AP",
+    describe: (p) => `${p.armyName || p.armyId} を ${pathText(p.path)} へ移動`
+  },
+  attackArmy: {
+    label: "進撃（攻撃）",
+    cost: "AP",
+    describe: (p) => `${p.armyName || p.armyId} で ${pathText(p.path)} へ進撃`
+  },
+  defendArmy: {
+    label: "防衛配置",
+    cost: "なし",
+    describe: (p) => `${p.armyName || p.armyId} を防衛配置`
+  },
+  setDoctrine: {
+    label: "教義変更",
+    cost: "なし",
+    describe: (p) => `教義を ${p.doctrine} に変更`
+  },
+  declareWar: {
+    label: "宣戦布告",
+    cost: "政治力200",
+    describe: (p) => `${p.targetName || p.targetNationId} へ宣戦（目標: ${(p.goals || []).join("・") || "なし"}）`
+  },
+  proposePeace: {
+    label: "講和提案",
+    cost: "なし",
+    describe: (p) => `戦争 ${p.warId} の講和を提案`
+  },
+  acceptPeace: {
+    label: "講和承認",
+    cost: "なし",
+    describe: (p) => `戦争 ${p.warId} の講和を承認`
   }
 };
 
@@ -178,6 +237,16 @@ const RESOURCE_LABELS = {
 
 function industryLabel(k) { return INDUSTRY_LABELS[k] || k; }
 function resourceLabel(k) { return RESOURCE_LABELS[k] || k; }
+function unitLabel(k) {
+  if (k === "line" || !k) return "通常兵";
+  const u = SPECIAL_UNITS_BY_ID[k];
+  return u ? u.name : k;
+}
+function pathText(path) {
+  if (!Array.isArray(path) || !path.length) return "（経路なし）";
+  if (path.length > 4) return `${path[0]}→…→${path[path.length - 1]}（${path.length - 1}ホップ）`;
+  return path.join("→");
+}
 function num(v) { const n = Number(v); return isFinite(n) ? n.toLocaleString() : "0"; }
 function pct(v) { const n = Number(v); return isFinite(n) ? Math.round(n * 100) + "%" : "0%"; }
 function fmtRate(v) { const n = Number(v); return isFinite(n) ? n.toFixed(2) : "0.00"; }

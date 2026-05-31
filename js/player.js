@@ -33,6 +33,7 @@ import {
   postBoard, subscribeBoard, deleteBoardPost,
   createTradeProposal, subscribeTradeProposals, cancelTradeProposal
 } from "./mail.js";
+import { initMilitaryTab } from "./military-ui.js";
 
 const PICKED_STROKE = "#ffd166";
 const PICKED_STROKE_W = "2.5";
@@ -85,6 +86,10 @@ let mapSvg = null;
 let panZoom = null;
 const elById = new Map();
 const originalStrokes = new Map(); // path -> {stroke, width} 選択ハイライト解除用
+let policyMapSvg = null;
+let policyPanZoom = null;
+const policyElById = new Map();
+const policyOriginalStrokes = new Map();
 let selectedMode = "country";
 let highlightOwn = false;
 let world = null;          // aster_stella/world（世界景気）
@@ -140,6 +145,7 @@ async function init() {
   await loadMaps();
   setupTabs();
   setupSettings();
+  setupMilitaryTab();
 
   // 予約の変化を購読して各タブの予約一覧を更新
   subscribeOrders(nationId, (orders) => {
@@ -334,6 +340,18 @@ async function loadMaps() {
   miniBox.innerHTML = "";
   miniBox.appendChild(mini);
   paintMini(mini);
+
+  // ステート政策タブの地図（自国強調・タップで選択）
+  policyMapSvg = makeMapSvg();
+  const policyBox = document.getElementById("policy-map-container");
+  if (policyBox) {
+    policyBox.innerHTML = "";
+    policyBox.appendChild(policyMapSvg);
+    policyPanZoom = attachPanZoom(policyMapSvg);
+    indexPathsInto(policyMapSvg, policyElById, policyOriginalStrokes);
+    paintPolicyMap();
+    applyPickedHighlight();
+  }
 }
 
 function makeMapSvg() {
@@ -346,21 +364,30 @@ function makeMapSvg() {
 }
 
 function indexPaths(svg, map) {
+  indexPathsInto(svg, map, originalStrokes);
+}
+
+function indexPathsInto(svg, map, strokes) {
   map.clear();
-  originalStrokes.clear();
+  strokes.clear();
   svg.querySelectorAll("#map > path").forEach((p) => {
     if (!p.id || p.id.startsWith("pattern")) return;
     map.set(p.id, p);
-    originalStrokes.set(p.id, { stroke: p.getAttribute("stroke"), width: p.getAttribute("stroke-width") });
+    strokes.set(p.id, { stroke: p.getAttribute("stroke"), width: p.getAttribute("stroke-width") });
   });
 }
 
-function restoreStroke(name) {
-  const el = elById.get(name);
-  const orig = originalStrokes.get(name);
+function restoreStrokeOn(name, map, strokes) {
+  const el = map.get(name);
+  const orig = strokes.get(name);
   if (!el || !orig) return;
   if (orig.stroke === null) el.removeAttribute("stroke"); else el.setAttribute("stroke", orig.stroke);
   if (orig.width === null) el.removeAttribute("stroke-width"); else el.setAttribute("stroke-width", orig.width);
+}
+
+function restoreStroke(name) {
+  restoreStrokeOn(name, elById, originalStrokes);
+  restoreStrokeOn(name, policyElById, policyOriginalStrokes);
 }
 
 function paintMini(svg) {
@@ -370,6 +397,16 @@ function paintMini(svg) {
     p.setAttribute("fill", own ? (nation.color || "#5aa9ff") : theme().fadeOther);
     p.style.cursor = "default";
   });
+}
+
+function paintPolicyMap() {
+  if (!policyMapSvg) return;
+  for (const [name, p] of policyElById) {
+    const s = statesData[name];
+    const own = s && s.country === nation.id;
+    p.setAttribute("fill", own ? (nation.color || "#5aa9ff") : theme().fadeOther);
+    p.style.cursor = own ? "pointer" : "default";
+  }
 }
 
 function applyMapColors() {
@@ -480,6 +517,8 @@ function switchTab(tab) {
   const panels = document.querySelectorAll(".tab-panel");
   for (const b of buttons) b.classList.toggle("active", b.dataset.tab === tab);
   for (const p of panels) p.classList.toggle("active", p.dataset.tab === tab);
+  // 軍事タブは地図が表示されてから getBBox で重心を取れるため、表示時に再描画する。
+  if (tab === "military" && militaryTab) militaryTab.refresh();
 }
 
 function applyMapTheme() {
@@ -488,15 +527,19 @@ function applyMapTheme() {
   if (mc) mc.style.filter = f;
   const mini = document.getElementById("mini-map");
   if (mini) mini.style.filter = f;
+  const pmc = document.getElementById("policy-map-container");
+  if (pmc) pmc.style.filter = f;
 }
 
 function applyPickedHighlight() {
   if (!pickedStateName) return;
-  const el = elById.get(pickedStateName);
-  if (el) {
-    el.setAttribute("stroke", PICKED_STROKE);
-    el.setAttribute("stroke-width", PICKED_STROKE_W);
-    el.parentNode.appendChild(el); // 最前面へ
+  for (const map of [elById, policyElById]) {
+    const el = map.get(pickedStateName);
+    if (el) {
+      el.setAttribute("stroke", PICKED_STROKE);
+      el.setAttribute("stroke-width", PICKED_STROKE_W);
+      el.parentNode.appendChild(el); // 最前面へ
+    }
   }
 }
 
@@ -549,6 +592,8 @@ function setupTabs() {
       // ミニ地図の自国強調も塗り直す（fadeOther を使うため）
       const miniSvg = document.querySelector("#mini-map svg");
       if (miniSvg) paintMini(miniSvg);
+      paintPolicyMap();
+      applyPickedHighlight();
     });
   }
   applyMapTheme();
@@ -556,6 +601,28 @@ function setupTabs() {
   document.getElementById("btn-zoom-in").addEventListener("click", () => panZoom && panZoom.zoomIn());
   document.getElementById("btn-zoom-out").addEventListener("click", () => panZoom && panZoom.zoomOut());
   document.getElementById("btn-zoom-reset").addEventListener("click", () => panZoom && panZoom.reset());
+
+  // ステート政策タブの地図
+  const policyContainer = document.getElementById("policy-map-container");
+  if (policyContainer) {
+    policyContainer.addEventListener("click", (e) => {
+      if (policyPanZoom && policyPanZoom.wasDragging()) return;
+      const p = e.target.closest("path");
+      if (!p || !policyElById.has(p.id)) return;
+      const s = statesData[p.id];
+      if (!s || s.country !== nation.id) {
+        flash("自国のステートを選んでください。", "err");
+        return;
+      }
+      pickState(p.id);
+    });
+  }
+  const pIn = document.getElementById("btn-policy-zoom-in");
+  const pOut = document.getElementById("btn-policy-zoom-out");
+  const pRst = document.getElementById("btn-policy-zoom-reset");
+  if (pIn) pIn.addEventListener("click", () => policyPanZoom && policyPanZoom.zoomIn());
+  if (pOut) pOut.addEventListener("click", () => policyPanZoom && policyPanZoom.zoomOut());
+  if (pRst) pRst.addEventListener("click", () => policyPanZoom && policyPanZoom.reset());
 }
 
 function setupSettings() {
@@ -563,6 +630,27 @@ function setupSettings() {
     clearSession();
     window.location.replace("player-login.html");
   });
+}
+
+// 軍事タブ（戦争システム, military-ui.js）の初期化。
+// 共有データはアクセサ経由で渡し、命令は既存の予約方式(addOrder)に積む。
+let militaryTab = null;
+function setupMilitaryTab() {
+  try {
+    militaryTab = initMilitaryTab({
+      nationId,
+      getNation: () => nation,
+      getStates: () => statesData,
+      getAdjacency: () => adjacency,
+      getNationsById: () => nationsById,
+      getSvgText: () => svgText,
+      addOrder: (kind, payload) => addOrder(nationId, kind, payload),
+      flash
+    });
+  } catch (err) {
+    const box = document.getElementById("mil-ops");
+    if (box) box.innerHTML = '<p class="loading">軍事タブの初期化に失敗しました: ' + escapeHtml(err.message) + "</p>";
+  }
 }
 
 function otherNationOptions() {
@@ -618,7 +706,11 @@ function renderSettings() {
       await set(ref(db, `aster_stella/nations/${nation.id}/color`), colorI.value);
       nation.color = colorI.value;
       if (nationsById[nation.id]) nationsById[nation.id].color = colorI.value;
-      applyMapColors(); applyPickedHighlight();
+      applyMapColors();
+      paintPolicyMap();
+      applyPickedHighlight();
+      const miniSvg = document.querySelector("#mini-map svg");
+      if (miniSvg) paintMini(miniSvg);
       renderDashboard();
       flash("国旗色を変更しました。", "ok");
     } catch (err) { flash("変更に失敗: " + err.message, "err"); }
@@ -911,7 +1003,7 @@ function statePickerControl() {
 // -----------------------------------------------------------------------------
 // 予約一覧
 // -----------------------------------------------------------------------------
-const ORDER_CONTAINERS = ["domestic-orders", "statepolicy-orders", "economy-orders", "research-orders"];
+const ORDER_CONTAINERS = ["domestic-orders", "statepolicy-orders", "economy-orders", "research-orders", "military-orders"];
 function renderAllPendingOrders() {
   for (const id of ORDER_CONTAINERS) renderPendingOrders(id);
 }
@@ -1235,11 +1327,20 @@ function renderEconomy() {
     trendBox.appendChild(noteP("景気が悪く民間産業が経済減衰を出しています。イデオロギーにより減衰量は変わります（計画経済は出しません）。"));
   }
   if (history.length > 1) {
-    const wSeries = [{ label: "世界景気", color: "#7be0c7", points: history.map((h) => Number(h.worldValue) || 0) }];
-    trendBox.appendChild(lineChart(wSeries, { }));
-    trendBox.appendChild(chartLegend([{ label: "世界景気の推移", color: "#7be0c7" }]));
+    const series = [
+      { label: "世界景気", color: "#7be0c7", points: history.map((h) => Number(h.worldValue) || 0) },
+      { label: "国家別景気", color: "#5aa9ff", points: history.map((h) => {
+        const rec = h.nations && h.nations[nation.id];
+        return rec ? (Number(rec.economyTrend) || 0) : 0;
+      }) }
+    ];
+    trendBox.appendChild(lineChart(series, { }));
+    trendBox.appendChild(chartLegend([
+      { label: "世界景気の推移", color: "#7be0c7" },
+      { label: "国家別景気の推移", color: "#5aa9ff" }
+    ]));
   } else {
-    trendBox.appendChild(noteP("世界景気の推移グラフはターンが進むと表示されます。"));
+    trendBox.appendChild(noteP("世界景気・国家別景気の推移グラフはターンが進むと表示されます。"));
   }
 
   // 資源収支

@@ -21,6 +21,7 @@
     <button type="button" class="tab-btn" data-tab="economy">経済 / 貿易</button>
     <button type="button" class="tab-btn" data-tab="research">研究</button>
     <button type="button" class="tab-btn" data-tab="diplomacy">外交</button>
+    <button type="button" class="tab-btn" data-tab="military">軍事</button>
     <button type="button" class="tab-btn" data-tab="settings">設定</button>
   </nav>
 
@@ -111,8 +112,21 @@
     <section class="tab-panel" data-tab="statepolicy">
       <div class="panel">
         <h2>ステートを選ぶ</h2>
-        <p class="loading">カードをタップ、または地図タブで自国領をタップして選択できます。</p>
-        <div id="state-cards" class="state-cards"></div>
+        <div class="map-wrap">
+          <div id="policy-map-container" class="map-container">
+            <p class="loading">地図を読み込み中...</p>
+          </div>
+          <div class="zoom-controls" aria-label="地図ズーム">
+            <button id="btn-policy-zoom-in" type="button" class="zoom-btn" aria-label="拡大">+</button>
+            <button id="btn-policy-zoom-out" type="button" class="zoom-btn" aria-label="縮小">&minus;</button>
+            <button id="btn-policy-zoom-reset" type="button" class="zoom-btn zoom-reset" aria-label="リセット">リセット</button>
+          </div>
+        </div>
+        <p class="loading">地図で自国領をタップ、または下の一覧から選択できます。</p>
+        <details class="state-cards-details" open>
+          <summary>ステート一覧</summary>
+          <div id="state-cards" class="state-cards"></div>
+        </details>
       </div>
       <div class="panel">
         <h2>選択中のステート</h2>
@@ -193,6 +207,40 @@
         <h2>掲示板</h2>
         <div id="board-compose"></div>
         <div id="board-list" class="mail-list"></div>
+      </div>
+    </section>
+
+    <!-- 軍事 -->
+    <section class="tab-panel" data-tab="military">
+      <div class="panel map-section">
+        <div class="map-wrap">
+          <div id="mil-map-container" class="map-container war-map">
+            <p class="loading">地図を読み込み中...</p>
+          </div>
+          <div class="zoom-controls" aria-label="地図ズーム">
+            <button id="btn-mil-zoom-in" type="button" class="zoom-btn" aria-label="拡大">+</button>
+            <button id="btn-mil-zoom-out" type="button" class="zoom-btn" aria-label="縮小">&minus;</button>
+            <button id="btn-mil-zoom-reset" type="button" class="zoom-btn zoom-reset" aria-label="リセット">リセット</button>
+          </div>
+        </div>
+        <div class="map-tools" id="mil-toolbar"></div>
+        <p id="mil-status" class="status"></p>
+      </div>
+      <div class="panel">
+        <h2>作戦パネル</h2>
+        <div id="mil-ops"></div>
+      </div>
+      <div class="panel">
+        <h2>軍隊一覧</h2>
+        <div id="mil-armies"></div>
+      </div>
+      <div class="panel">
+        <h2>動員・配備</h2>
+        <div id="mil-mobilize"></div>
+      </div>
+      <div class="panel">
+        <h2>予約中の操作</h2>
+        <div id="military-orders" class="order-list"></div>
       </div>
     </section>
 

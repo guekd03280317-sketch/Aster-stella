@@ -6,6 +6,7 @@
 //   - 計算で求めるステータス     : 上記から算出（編集不可）
 
 import { INDUSTRY_FIELDS } from "./state-schema.js";
+import { defaultMilitary, normalizeMilitary } from "./war-schema.js";
 
 // 経済イデオロギー（プルダウン候補）
 export const ECONOMIC_IDEOLOGIES = [
@@ -168,6 +169,7 @@ export function defaultNation(opts = {}) {
   n.logs = [];
   n.orders = {};
   n.mail = {};
+  n.military = defaultMilitary();
   return n;
 }
 
@@ -201,6 +203,8 @@ export function normalizeNation(input) {
   base.orders = normalizeOrders(input.orders);
   // mail は受信箱（キー付きオブジェクト）。管理者保存で消さないよう保持する。
   base.mail = (input.mail && typeof input.mail === "object") ? input.mail : {};
+  // military は軍関連の追加ツリー（war-schema.js）。管理者保存で消さないよう保持する。
+  base.military = normalizeMilitary(input.military);
   return base;
 }
 
