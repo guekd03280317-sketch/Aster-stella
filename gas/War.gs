@@ -37,12 +37,65 @@ function WAR_CONFIG_() {
     annihilationDebuff: 0.7, annihilationMaxRounds: 30, forcedAnnihilationNoCap: true, surrenderAtMorale: 0,
     battleRoundsPerTick: 1, battleMaxRounds: 30
   };
-  // config/war による上書き（ライブチューニング, §18）
+  // config/war による上書き（Firebase。後方互換）
   try {
     var ov = fbGet_(ROOT + "/config/war");
     if (ov && typeof ov === "object") { for (var k in ov) { if (c.hasOwnProperty(k)) c[k] = ov[k]; } }
   } catch (e) {}
+  // 「係数_戦争」シートによる上書き（運営がシートで調整。スカラ値のみ）。シートが優先。
+  try {
+    var sv = readWarCoefSheet_();
+    for (var k2 in sv) { if (c.hasOwnProperty(k2) && typeof c[k2] === "number") c[k2] = sv[k2]; }
+  } catch (e2) {}
   return c;
+}
+
+var WAR_COEF_SHEET_ = "係数_戦争";
+
+// 「係数_戦争」シートを読む（項目（key）／値）。スカラ値の上書き用。
+function readWarCoefSheet_() {
+  var sh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(WAR_COEF_SHEET_);
+  if (!sh) return {};
+  var rows = sh.getDataRange().getValues(), out = {};
+  for (var i = 1; i < rows.length; i++) {
+    var label = String(rows[i][0] || "");
+    var m = /（([a-zA-Z]+)）\s*$/.exec(label); // 「ラベル（key）」から key を取り出す
+    var key = m ? m[1] : label;
+    var v = Number(rows[i][1]);
+    if (key && isFinite(v)) out[key] = v;
+  }
+  return out;
+}
+
+// 「係数_戦争」シートを生成（運営編集用）。WAR_CONFIG_ のスカラ既定値を「ラベル（key）／値／説明」で並べる。
+function setupWarCoefSheet_() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sh = ss.getSheetByName(WAR_COEF_SHEET_);
+  if (!sh) sh = ss.insertSheet(WAR_COEF_SHEET_);
+  if (sh.getLastRow() > 0) return "係数_戦争 既存";
+  sh.getRange(1, 1, 1, 3).setValues([["項目", "値", "説明"]]).setFontWeight("bold").setBackground("#f4cccc");
+  sh.setFrozenRows(1);
+  var labels = {
+    apMax: "AP最大", apCostOwn: "移動AP(自国)", apCostOccupied: "移動AP(占領地)", apCostEnemy: "移動AP(敵領)",
+    moraleMax: "士気最大", moraleRegen: "士気回復/ターン", moraleLossPerDeath: "士気減/戦死",
+    penetrationPenalty: "貫徹不足の攻撃倍率", militaryGoodsPerTroopPerRound: "戦闘1単位の軍需/兵",
+    declareWarPP: "宣戦の政治力", warScoreWin: "勝利スコア", scoreOccupy: "占領スコア",
+    scoreCapital: "首都占領スコア", scoreArmyDestroyed: "軍撃破スコア",
+    annihilationDebuff: "殲滅戦デバフ", annihilationMaxRounds: "殲滅戦上限R", surrenderAtMorale: "降伏士気",
+    supplyBaseCost: "補給基礎コスト", supplyInfraFactor: "インフラ補給係数",
+    rareMineralMinLevel: "重要鉱物の必要技術", machineryMinLevel: "機械消費の必要技術",
+    atPerSoldierTechDiv: "攻撃力の技術除数", oilExpBase: "石油指数係数"
+  };
+  var c = WAR_CONFIG_();
+  var rows = [];
+  for (var k in c) {
+    if (typeof c[k] !== "number") continue; // スカラのみ（supplyWeights等のオブジェクトは除外）
+    var lbl = (labels[k] || k) + "（" + k + "）";
+    rows.push([lbl, c[k], ""]);
+  }
+  sh.getRange(2, 1, rows.length, 3).setValues(rows);
+  sh.setColumnWidth(1, 240);
+  return "係数_戦争 作成";
 }
 
 // 累進防御力（1兵, §ヘッダー）: <10→2,<20→4,<30→10,<40→12, 以降+5毎+1

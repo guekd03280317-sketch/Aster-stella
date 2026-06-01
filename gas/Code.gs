@@ -47,8 +47,24 @@ function setupProperties() {
 
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
-  ScriptApp.newTrigger("runTurn").timeBased().everyHours(6).create();      // ターン進行
+  // ターン進行は「設定」シートの実行間隔に従い turnDispatcher_ が判定する。
+  // ディスパッチャは細かめ（10分ごと）に起動し、間隔到来時だけ runTurn を回す。
+  ScriptApp.newTrigger("turnDispatcher_").timeBased().everyMinutes(10).create();
   ScriptApp.newTrigger("backupToSheets").timeBased().everyDays(1).atHour(3).create(); // 日次バックアップ
+}
+
+// 実行間隔（「設定」シート）に従ってターン処理を回すディスパッチャ。
+// 運営は ops.html から間隔を変更でき、ここが次回以降のタイミングを決める。
+function turnDispatcher_() {
+  var sc;
+  try { sc = readSchedule_(); } catch (e) { sc = { intervalMin: 360, lastRunAt: "", autoRun: true }; }
+  if (!sc.autoRun) return; // 自動実行OFF（手動のみ）
+  var now = new Date();
+  var last = sc.lastRunAt ? new Date(sc.lastRunAt) : null;
+  var dueMs = (Number(sc.intervalMin) || 360) * 60 * 1000;
+  if (last && (now.getTime() - last.getTime()) < dueMs) return; // まだ間隔に達していない
+  runTurn();
+  try { writeSchedule_({ lastRunAt: Utilities.formatDate(now, "Asia/Tokyo", "yyyy-MM-dd HH:mm:ss") }); } catch (e2) {}
 }
 
 // ====== Firebase REST ======
@@ -272,35 +288,45 @@ function runTurn() {
     var adjacency = mapData.adjacency || {};
     var proposals = fbGet_(ROOT + "/tradeProposals") || {};
 
-    var processedOrderPaths = []; // 後で個別 DELETE するキー
     var tradeVolumeByNation = {};
     var ctx = { adjacency: adjacency, proposals: proposals, cfg: cfg, tradeVol: tradeVolumeByNation };
 
-    // --- 各国の予約を処理 ---
+    // --- 各国の初期化（欠損補完） ---
     Object.keys(nations).forEach(function (nid) {
       var n = nations[nid];
       if (!n.stats) n.stats = {};
       if (!n.research) n.research = { tracks: { industrial: 0, military: 0 }, allocation: { industrial: 0.5, military: 0.5 }, upgrades: {} };
       if (!n.logs) n.logs = [];
-      var orders = n.orders || {};
-      Object.keys(orders).forEach(function (oid) {
-        var o = orders[oid];
-        if (!o || !o.kind) return;
-        try {
-          processOrder_(o, n, nid, nations, states, market, cfg, tradeVolumeByNation, ctx);
-        } catch (e) {
-          n.logs.push({ at: Date.now(), kind: "turn", text: "予約処理エラー: " + o.kind });
-        }
-        processedOrderPaths.push(ROOT + "/nations/" + nid + "/orders/" + oid);
-      });
+    });
+
+    // --- 予約処理（スプレッドシート「予約」シートから読む。Firebaseには予約を置かない） ---
+    var pendingOrders = readPendingOrders_();
+    pendingOrders.forEach(function (po) {
+      var n = nations[po.nationId];
+      if (!n) { markOrderRow_(po.rowIndex, ORDER_STATUS_.failed, "国家が存在しません"); return; }
+      var o = { id: po.id, kind: po.kind, payload: po.payload };
+      if (!o.kind) { markOrderRow_(po.rowIndex, ORDER_STATUS_.failed, "種別なし"); return; }
+      try {
+        processOrder_(o, n, po.nationId, nations, states, market, cfg, tradeVolumeByNation, ctx);
+        markOrderRow_(po.rowIndex, ORDER_STATUS_.done, "");
+      } catch (e) {
+        n.logs.push({ at: Date.now(), kind: "turn", text: "予約処理エラー: " + o.kind });
+        markOrderRow_(po.rowIndex, ORDER_STATUS_.failed, String(e));
+      }
     });
 
     // 取引提案の状態変化を書き戻す
     fbPut_(ROOT + "/tradeProposals", proposals);
 
     // --- 経済（産業稼働・税収・研究・人口） ---
+    // ①各国の入力を集計（GAS）→ ②経済式（スプレッドシート or JSミラー）→ ③適用（GAS）
+    var econInputs = {};
     Object.keys(nations).forEach(function (nid) {
-      applyEconomy_(nations[nid], nid, states, world, cfg, tradeVolumeByNation[nid] || 0);
+      econInputs[nid] = econAggregate_(nations[nid], nid, states, world, cfg, tradeVolumeByNation[nid] || 0);
+    });
+    var econOutputs = computeEconomyOutputs_(econInputs, cfg); // シート有効ならシート、無ければ econFormulas_
+    Object.keys(nations).forEach(function (nid) {
+      if (econOutputs[nid]) econApply_(nations[nid], nid, states, econInputs[nid], econOutputs[nid], cfg);
     });
 
     // --- 戦争システム（§7）: 経済の後に補給→消費→充足率→戦闘解決 ---
@@ -322,7 +348,6 @@ function runTurn() {
     Object.keys(nations).forEach(function (nid) {
       var n = nations[nid];
       n.logs = (n.logs || []).slice(-100);
-      // orders には触れない（処理済みキーだけ後で個別削除）
       var patch = {
         stats: n.stats, research: n.research, logs: n.logs, stockpile: ensureStock_(n),
         ideology: n.ideology || "", prevIdeology: n.prevIdeology || ""
@@ -336,8 +361,8 @@ function runTurn() {
     fbPut_(ROOT + "/market", market);
     fbPut_(ROOT + "/wars", wars);
 
-    // 処理済み予約だけ削除
-    processedOrderPaths.forEach(function (p) { fbDelete_(p); });
+    // 処理済み/失敗/取消の予約行を「予約履歴」へ退避（「予約」シートを軽く保つ）
+    try { archiveProcessedOrders_(); } catch (arcErr) { Logger.log("予約退避エラー: " + arcErr); }
 
     // 履歴を追加
     appendHistory_(nations, world);
@@ -587,6 +612,8 @@ function settleTrade_(offerId, accepterNid, accepterN, nations, market, tradeVol
   market._lastTrades[off.resource] = Number(off.price) || 0;
 }
 
+// 【非推奨・参照用】経済計算は Economy.gs の econAggregate_/econFormulas_/econApply_ に分割移行済み。
+// runTurn からは呼ばれない。挙動の基準（移行検証の比較対象）として残置。Phase 3 で削除予定。
 function applyEconomy_(n, nid, states, world, cfg, tradeVolume) {
   if (!n.stats) n.stats = {};
   if (!n.research) n.research = { tracks: { industrial: 0, military: 0 }, allocation: { industrial: 0.5, military: 0.5 }, upgrades: {} };
@@ -831,17 +858,50 @@ function doGet(e) {
   if (p.action === "runbackup") { backupToSheets(); return json_({ ok: true, ran: "backupToSheets" }); }
   if (p.action === "backup") return json_(getBackup(p.date) || {});
   if (p.action === "getconfig") return json_(readConfigSheet_());
+  if (p.action === "getschedule") return json_(readSchedule_());
   if (p.path) return json_(fbGet_(p.path.replace(/^\//, "")) || {});
-  return json_({ ok: true, hint: "use ?path= / ?action=runturn|runbackup|backup|getconfig with key" });
+  return json_({ ok: true, hint: "use ?path= / ?action=runturn|runbackup|backup|getconfig|getschedule with key" });
 }
 function doPost(e) {
   var body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json_({ error: "bad json" }); }
-  if (!body || body.key !== apiKey_()) return json_({ error: "unauthorized" });
+  if (!body) return json_({ error: "no body" });
+
+  // --- プレイヤー経路（運営API_KEY不要。国ID＋パスワード照合で認可） ---
+  if (body.action === "submitOrder" || body.action === "listOrders" || body.action === "cancelOrder") {
+    return handlePlayerOrderApi_(body);
+  }
+
+  // --- 運営経路（API_KEY 必須） ---
+  if (body.key !== apiKey_()) return json_({ error: "unauthorized" });
   if (body.action === "setconfig") { writeConfigSheet_(body.config || {}); return json_({ ok: true, set: "config" }); }
+  if (body.action === "setschedule") { writeSchedule_(body.schedule || {}); return json_({ ok: true, set: "schedule" }); }
   if (!body.path) return json_({ error: "path required" });
   fbPut_(body.path.replace(/^\//, ""), body.value);
   return json_({ ok: true, path: body.path });
+}
+
+// プレイヤーの予約API。Firebaseの nations/{id}/password と照合して認可する（平文・既存仕様）。
+function handlePlayerOrderApi_(body) {
+  var nid = body.nationId;
+  if (!nid) return json_({ error: "nationId required" });
+  var nation = fbGet_(ROOT + "/nations/" + nid);
+  if (!nation) return json_({ error: "nation not found" });
+  if (String(nation.password || "") !== String(body.password || "")) return json_({ error: "auth failed" });
+
+  if (body.action === "submitOrder") {
+    var o = body.order || {};
+    if (!o.kind) return json_({ error: "kind required" });
+    var id = appendOrderRow_({ id: o.id, nationId: nid, nationName: nation.name || nid, kind: o.kind, payload: o.payload || {} });
+    return json_({ ok: true, id: id });
+  }
+  if (body.action === "listOrders") {
+    return json_({ ok: true, orders: listOrdersForNation_(nid) });
+  }
+  if (body.action === "cancelOrder") {
+    return json_({ ok: cancelOrderInSheet_(nid, body.orderId) });
+  }
+  return json_({ error: "unknown action" });
 }
 
 // Config シート（計算式の調整）を key/value で読み書きする。

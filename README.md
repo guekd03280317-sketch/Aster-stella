@@ -30,10 +30,14 @@ Aster_Stella/
   js/player-auth.js         セッション認証（sessionStorage）
   js/player.js              メイン画面の処理（全タブ）
   js/player-schema.js       予約(order)種別・市場・ログのスキーマ
-  js/orders.js              予約キュー（append-only / 競合回避）
-  js/economy.js             共有経済モデル（産業・資源・景気の式）
+  js/orders.js              予約の送受信（GASウェブアプリ経由でスプレッドシートへ）
+  js/economy.js             共有経済モデル（産業・資源・景気の式。クライアント試算用）
   js/charts.js              依存なしの軽量SVGチャート
-  gas/Code.gs               GAS ターン処理・Sheetsバックアップ・API
+  gas/Code.gs               GAS ターン処理・予約処理・API・Sheetsバックアップ
+  gas/Sheets.gs             予約／予約履歴／設定シートの入出力
+  gas/Economy.gs            経済計算の3分割（集計→式→適用。式はシートと同期）
+  gas/EconomySheet.gs       経済計算のセル数式生成・入出力（計算_経済シート）
+  gas/War.gs                戦争システム（補給・戦闘・占領・係数_戦争シート）
   gas/appsscript.json       GAS プロジェクト設定（ウェブアプリ）
 ```
 
@@ -44,25 +48,28 @@ Aster_Stella/
 
 ### 予約方式（重要なアーキテクチャ）
 
-プレイヤーの操作は集計済みステータスを直接書き換えず、
-`aster_stella/nations/{id}/orders/{orderId}` に **1件ずつ固有キーの「予約」** として積む。
-GAS が一定時刻に全国家分を読み込んで一斉処理（ターン進行）する。
+**読み込みは Firebase**（起動が速い）。一方プレイヤーの**操作（予約）は GASウェブアプリ経由で
+スプレッドシートの「予約」シートに保存**する（Firebase への予約保存は同時書き込みで消える
+問題があったため廃止）。GAS が一定間隔で「予約」シートを読み、一斉処理（ターン進行）して
+結果を Firebase に書き写す。
 
-- 予約は配列まるごとではなく子ノード単位で読み書きするため、複数プレイヤーが
-  同時に操作しても、また GAS 処理中に予約が追加されても、上書きで消えない。
-- GAS は処理した予約キーだけを個別削除し、集計値は PATCH（merge）で書く（orders には触れない）。
+- 予約送信: ブラウザ → `doPost(submitOrder)`（国ID＋パスワードで認可）→「予約」シートに1行追記。
+- 予約一覧: `doPost(listOrders)` で自国の未処理予約を取得して表示（リアルタイム購読の代わりにポーリング）。
+- GAS は処理した予約行を「処理済」にして「予約履歴」へ退避。集計値は Firebase に PATCH/PUT で書く。
+- **経済の毎ターン計算はスプレッドシートのセル数式**（`計算_経済` シート）で行え、運営が式を調整できる。
+  既定は OFF（`設定` シートの「経済計算をシートで行う」）で、その間は GAS内蔵の同一式で計算する。
+- **戦争シミュレーションは GAS**（`gas/War.gs`）。係数は `係数_戦争` シートで調整できる。
 
 ### GAS の設定
 
-1. `gas/Code.gs` を Apps Script プロジェクトに貼り付ける。
+1. `gas/Code.gs` ほか `gas/*.gs` を Apps Script プロジェクトに貼り付ける。
 2. `setupProperties()` を1回実行し、ログに出る `API_KEY` を控える（`DATABASE_URL` は自動設定）。
-3. `setupTriggers()` を1回実行（`runTurn` 6時間ごと / `backupToSheets` 毎日3時）。
-4. ウェブアプリとしてデプロイすると入出力APIが使える:
-   - 吐き出し: `GET ?key=APIKEY&path=aster_stella/nations`
-   - バックアップ取得: `GET ?key=APIKEY&action=backup&date=yyyy-MM-dd`
-   - 入力: `POST {"key":APIKEY,"path":"aster_stella/...","value":...}`
-5. 計算式の調整はスプレッドシートの `Config` シート（key/value）で上書きできる。
-   バックアップは同スプレッドシートの `Backup` / `Nations` シートに保存される。
+3. `setupSheets_()` を1回実行（予約／予約履歴／設定／係数_経済／入力_国家／計算_経済／係数_戦争 を生成）。
+4. `setupTriggers()` を1回実行（`turnDispatcher_` が「設定」シートの実行間隔でターンを進める / `backupToSheets` 毎日3時）。
+5. ウェブアプリとしてデプロイし、運営ページ（ops.html）で:
+   - 「プレイヤー用にURLを公開保存」でウェブアプリURLを `aster_stella/config/gasWebAppUrl` に保存（予約送信に必須）。
+   - 「ターン処理のタイミング」で実行間隔を設定。
+   - 計算式は `係数_経済`/`計算_経済`/`係数_戦争`/`Config` シートで調整。バックアップは `Backup`/`Nations` シート。
 
 ## ローカルサーバーでの開き方
 

@@ -25,10 +25,19 @@ export function getSession() {
   }
 }
 
-export function setSession(nationId) {
-  const s = { nationId, loginAt: Date.now() };
+// password も保持する。予約はGASウェブアプリ経由でシートに保存する設計のため、
+// 予約POSTの認可（nations/{id}/password と照合）に使う。共同プレイ用途・平文。
+export function setSession(nationId, password) {
+  const s = { nationId, password: password || "", loginAt: Date.now() };
   sessionStorage.setItem(SESSION_KEY, JSON.stringify(s));
   return s;
+}
+
+// 予約API用の認証情報 { nationId, password }。セッションが無ければ null。
+export function getSessionCredentials() {
+  const s = getSession();
+  if (!s) return null;
+  return { nationId: s.nationId, password: s.password || "" };
 }
 
 export function clearSession() {

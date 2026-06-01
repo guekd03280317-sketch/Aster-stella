@@ -53,8 +53,33 @@
         <input type="text" id="gas-key" placeholder="setupProperties のログに出た値">
       </label>
       <div class="buttons">
-        <button id="btn-gas-save" type="button" class="secondary">URL/キーを保存</button>
+        <button id="btn-gas-save" type="button" class="secondary">URL/キーを保存（このブラウザ）</button>
+        <button id="btn-gas-publish" type="button">プレイヤー用にURLを公開保存</button>
       </div>
+      <p class="loading">「公開保存」を押すと上のURLを aster_stella/config/gasWebAppUrl に保存します。プレイヤーの予約送信に使われます（必須）。</p>
+      <p id="gas-publish-status" class="status"></p>
+    </section>
+
+    <section class="panel">
+      <h2>ターン処理のタイミング</h2>
+      <p class="loading">自動実行の間隔を設定します。GASの turnDispatcher_ がこの間隔でターンを進めます（スプレッドシートの「設定」シートに保存）。</p>
+      <div class="form-row">
+        <label class="field"><span>実行間隔（分）</span>
+          <input type="number" id="sched-interval" min="1" step="1" placeholder="360">
+        </label>
+        <label class="field"><span>自動実行</span>
+          <select id="sched-auto">
+            <option value="on">ON（間隔ごとに自動）</option>
+            <option value="off">OFF（手動のみ）</option>
+          </select>
+        </label>
+      </div>
+      <p class="loading">最終実行時刻: <span id="sched-last">—</span></p>
+      <div class="buttons">
+        <button id="btn-sched-load" type="button" class="secondary">設定を取得</button>
+        <button id="btn-sched-save" type="button">タイミングを保存</button>
+      </div>
+      <p id="sched-status" class="status"></p>
     </section>
 
     <section class="panel">

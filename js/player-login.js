@@ -87,7 +87,7 @@ async function tryLogin() {
   try {
     const ok = await authenticate(selectedId, pw);
     if (ok) {
-      setSession(selectedId);
+      setSession(selectedId, pw);
       setStatus("ログインしました。移動します...", "ok");
       window.location.replace("player.html");
     } else {

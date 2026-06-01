@@ -21,7 +21,7 @@ import {
   ECONOMIC_IDEOLOGIES,
   POLITICAL_IDEOLOGIES
 } from "./nation-schema.js";
-import { addOrder, cancelOrder, subscribeOrders } from "./orders.js";
+import { addOrder, cancelOrder, subscribeOrders, setOrdersEndpoint } from "./orders.js";
 import { describeOrder, orderLabel, MARKET_RESOURCES, normalizeMarket } from "./player-schema.js";
 import {
   FLOW_RESOURCES, computeTurn, investCost, CONFIG,
@@ -169,17 +169,22 @@ function ownStatesList() {
 }
 
 async function loadData() {
-  const [nationSnap, statesSnap, nationsSnap, worldSnap, marketSnap, historySnap, mapSnap] = await Promise.all([
+  const [nationSnap, statesSnap, nationsSnap, worldSnap, marketSnap, historySnap, mapSnap, configSnap] = await Promise.all([
     get(ref(db, `aster_stella/nations/${nationId}`)),
     get(ref(db, "aster_stella/states")),
     get(ref(db, "aster_stella/nations")),
     get(ref(db, "aster_stella/world")),
     get(ref(db, "aster_stella/market")),
     get(ref(db, "aster_stella/history")),
-    get(ref(db, "aster_stella/map"))
+    get(ref(db, "aster_stella/map")),
+    get(ref(db, "aster_stella/config"))
   ]);
   const mapData = mapSnap.exists() ? mapSnap.val() : null;
   adjacency = (mapData && mapData.adjacency) ? mapData.adjacency : {};
+
+  // 予約APIのGASウェブアプリURL（運営がops.htmlで設定）。orders.js に渡す。
+  const cfg = configSnap.exists() ? (configSnap.val() || {}) : {};
+  setOrdersEndpoint(cfg.gasWebAppUrl || "");
   if (!nationSnap.exists()) throw new Error("自国データが見つかりません");
   nation = normalizeNation(nationSnap.val());
   if (!nation.id) nation.id = nationId;

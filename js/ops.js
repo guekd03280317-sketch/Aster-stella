@@ -172,6 +172,46 @@ async function setConfig() {
   catch (err) { setStatus($("config-status"), "失敗: " + err.message, "err"); }
 }
 
+// ---- プレイヤー用にGASウェブアプリURLを公開（Firebase config に保存） ----
+async function publishGasUrl() {
+  const url = gasUrl();
+  if (!url) { setStatus($("gas-publish-status"), "先にGASウェブアプリURLを入力してください。", "err"); return; }
+  setStatus($("gas-publish-status"), "保存中...", "");
+  try {
+    await set(ref(db, "aster_stella/config/gasWebAppUrl"), url);
+    setStatus($("gas-publish-status"), "公開保存しました。プレイヤーの予約送信に使われます。", "ok");
+  } catch (err) {
+    setStatus($("gas-publish-status"), "保存失敗: " + err.message, "err");
+  }
+}
+
+// ---- ターン処理のタイミング（設定シート） ----
+async function loadSchedule() {
+  if (!requireGas($("sched-status"))) return;
+  setStatus($("sched-status"), "取得中...", "");
+  try {
+    const r = await gasGet({ action: "getschedule" });
+    if (r && r.intervalMin != null) {
+      $("sched-interval").value = r.intervalMin;
+      $("sched-auto").value = r.autoRun ? "on" : "off";
+      $("sched-last").textContent = r.lastRunAt || "—";
+      setStatus($("sched-status"), "取得しました。", "ok");
+    } else {
+      setStatus($("sched-status"), "取得エラー: " + JSON.stringify(r), "err");
+    }
+  } catch (err) { setStatus($("sched-status"), "失敗: " + err.message, "err"); }
+}
+async function saveSchedule() {
+  if (!requireGas($("sched-status"))) return;
+  const intervalMin = Math.max(1, parseInt($("sched-interval").value) || 360);
+  const autoRun = $("sched-auto").value === "on";
+  setStatus($("sched-status"), "保存中...", "");
+  try {
+    const r = await gasPost({ action: "setschedule", schedule: { intervalMin, autoRun } });
+    setStatus($("sched-status"), r.ok ? "保存しました。次回以降この間隔で自動実行されます。" : ("エラー: " + JSON.stringify(r)), r.ok ? "ok" : "err");
+  } catch (err) { setStatus($("sched-status"), "失敗: " + err.message, "err"); }
+}
+
 // ---- 過去データ ----
 async function getBackup() {
   if (!requireGas($("backup-status"))) return;
@@ -191,10 +231,13 @@ function init() {
   $("btn-dist-default").addEventListener("click", () => renderDistForm({ ...DEFAULT_DIST }));
   $("btn-dist-save").addEventListener("click", saveDist);
   $("btn-gas-save").addEventListener("click", saveGasCreds);
+  $("btn-gas-publish").addEventListener("click", publishGasUrl);
   $("btn-run-turn").addEventListener("click", runTurn);
   $("btn-run-backup").addEventListener("click", runBackup);
   $("btn-config-get").addEventListener("click", getConfig);
   $("btn-config-set").addEventListener("click", setConfig);
+  $("btn-sched-load").addEventListener("click", loadSchedule);
+  $("btn-sched-save").addEventListener("click", saveSchedule);
   $("btn-backup-get").addEventListener("click", getBackup);
   loadDist();
 }
