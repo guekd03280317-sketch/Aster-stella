@@ -144,7 +144,8 @@ function CONFIG_() {
     passiveGrowthPerTrend: 0.001,
     stateUpkeepBase: 10, stateUpkeepExp: 1.6,
     statePpUpkeepBase: 0.5, statePpUpkeepExp: 1.4,
-    annexBasePP: 50, annexExp: 1.5
+    annexBasePP: 50, annexExp: 1.5,
+    worldTrendChangeChance: 0.25
   };
   try {
     var sh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Config");
@@ -260,16 +261,18 @@ function adjustProbs_(probs, picked) {
   else if (picked === "好景気") move("好景気", "不景気", 20);
   else if (picked === "超好景気") move("超好景気", "恐慌", 10);
 }
-function stepWorld_(world) {
+function stepWorld_(world, cfg) {
   if (!world || !world.probs) world = defaultWorld_();
-  if (Math.random() < 0.25) {
+  var changeChance = (cfg && isFinite(Number(cfg.worldTrendChangeChance))) ? Number(cfg.worldTrendChangeChance) : 0.25;
+  if (Math.random() < changeChance) {
     var picked = pickTrend_(world.probs);
     world.trend = picked;
     adjustProbs_(world.probs, picked);
   }
   var d = TREND_DELTA[world.trend] || [-5, 5];
   var delta = d[0] + Math.random() * (d[1] - d[0]);
-  world.value = Math.max(0, (Number(world.value) || 10) + delta);
+  // 景気の変域は -100〜100（旧: 0未満にならなかった）
+  world.value = Math.max(-100, Math.min(100, (Number(world.value) || 10) + delta));
   return world;
 }
 
@@ -279,9 +282,11 @@ function runTurn() {
   if (!lock.tryLock(30000)) { Logger.log("ロック取得失敗。スキップ。"); return; }
   try {
     var cfg = CONFIG_();
+    // 係数調整シート（世界景気の変動幅・産業・特殊兵・建設コスト）をメモリ上の既定値へ上書き
+    try { applyCoefficientSheets_(); } catch (coErr) { Logger.log("係数シート適用エラー: " + coErr); }
     var nations = fbGet_(ROOT + "/nations") || {};
     var states = fbGet_(ROOT + "/states") || {};
-    var world = stepWorld_(fbGet_(ROOT + "/world") || defaultWorld_());
+    var world = stepWorld_(fbGet_(ROOT + "/world") || defaultWorld_(), cfg);
     var market = fbGet_(ROOT + "/market") || { prices: {}, offers: [] };
     if (!market.offers) market.offers = [];
     var mapData = fbGet_(ROOT + "/map") || {};
@@ -742,7 +747,7 @@ function applyEconomy_(n, nid, states, world, cfg, tradeVolume) {
   // 国家別景気: 世界景気へ寄せる。貿易総額/経済力 が大きいほど強く影響。計画経済は変動を受けにくい
   var influence = totalEconomy > 0 ? Math.min(1, tradeVolume / totalEconomy) : 0;
   var pull = (0.1 + 0.6 * influence) * ecoEff_(eco).worldDamp;
-  n.stats.economyTrend = (Number(n.stats.economyTrend) || 10) * (1 - pull) + worldVal * pull;
+  n.stats.economyTrend = Math.max(-100, Math.min(100, (Number(n.stats.economyTrend) || 10) * (1 - pull) + worldVal * pull));
 
   n.stats.totalEconomy = totalEconomy;
   n.stats.totalPopulation = totalPop;

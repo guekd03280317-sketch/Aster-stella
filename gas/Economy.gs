@@ -170,6 +170,7 @@ function econFormulas_(inp, cfg) {
   var influence = newTotalEconomy > 0 ? Math.min(1, inp.tradeVolume / newTotalEconomy) : 0;
   var pull = (0.1 + 0.6 * influence) * inp.worldDamp;
   var newTrend = inp.currentTrend * (1 - pull) + inp.worldValue * pull;
+  newTrend = Math.max(-100, Math.min(100, newTrend)); // 景気の変域 -100〜100
 
   return {
     nationId: inp.nationId,

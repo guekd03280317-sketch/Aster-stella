@@ -78,6 +78,8 @@ function setupSheets_() {
   try { if (typeof ensureEconFlagSetting_ === "function") ensureEconFlagSetting_(); } catch (e2) {}
   // 戦争係数シート
   try { if (typeof setupWarCoefSheet_ === "function") setupWarCoefSheet_(); } catch (e3) {}
+  // 係数調整シート群（世界景気・産業・特殊兵・建設コスト）
+  try { if (typeof setupCoefficientSheets_ === "function") setupCoefficientSheets_(); } catch (e4) {}
 
   return "setupSheets_ 完了";
 }

@@ -225,19 +225,19 @@ function readEconomyOutputs_() {
 // ---- 設定: 経済計算をシートで行うか ----
 function econUseSheet_() {
   var st = ss_().getSheetByName(SETTINGS_SHEET_);
-  if (!st) return false;
+  if (!st) return true; // 既定はシート式（設定シートが無い段階でも writeNationInputs_ が自動生成し、失敗時はJSミラーにフォールバック）
   var rows = st.getDataRange().getValues();
   for (var i = 1; i < rows.length; i++) {
-    if (rows[i][0] === "経済計算をシートで行う") return String(rows[i][1] || "OFF").toUpperCase() === "ON";
+    if (rows[i][0] === "経済計算をシートで行う") return String(rows[i][1] || "ON").toUpperCase() !== "OFF";
   }
-  return false;
+  return true; // 既定 ON
 }
 function ensureEconFlagSetting_() {
   var st = ss_().getSheetByName(SETTINGS_SHEET_);
   if (!st) return;
   var rows = st.getDataRange().getValues();
   for (var i = 1; i < rows.length; i++) if (rows[i][0] === "経済計算をシートで行う") return;
-  st.appendRow(["経済計算をシートで行う", "OFF", "ON で経済の毎ターン計算を『計算_経済』シートの数式で行う（運営が検証後に有効化）。OFF はGAS内蔵式。"]);
+  st.appendRow(["経済計算をシートで行う", "ON", "ON で経済の毎ターン計算を『計算_経済』シートの数式で行う（既定）。OFF はGAS内蔵式（同一結果）。数式が壊れた場合は自動でGAS内蔵式にフォールバック。"]);
 }
 
 // ============================================================
@@ -288,8 +288,9 @@ function econFormulaA1_(field, r) {
     case "governanceDelta":
       return "=-(" + inp("taxRate") + ")*1-" + self("deficits") + "*" + coef("deficitGovernancePenalty") + "*0.1";
     case "newTrend":
-      return "=" + inp("currentTrend") + "*(1-(" + coef("trendBaseInfluence") + "+" + coef("trendTradeInfluence") + "*IF(" + self("newTotalEconomy") + ">0,MIN(1," + inp("tradeVolume") + "/" + self("newTotalEconomy") + "),0))*" + inp("worldDamp") + ")+"
-        + inp("worldValue") + "*((" + coef("trendBaseInfluence") + "+" + coef("trendTradeInfluence") + "*IF(" + self("newTotalEconomy") + ">0,MIN(1," + inp("tradeVolume") + "/" + self("newTotalEconomy") + "),0))*" + inp("worldDamp") + ")";
+      // 景気の変域 -100〜100 にクランプ
+      return "=MAX(-100,MIN(100," + inp("currentTrend") + "*(1-(" + coef("trendBaseInfluence") + "+" + coef("trendTradeInfluence") + "*IF(" + self("newTotalEconomy") + ">0,MIN(1," + inp("tradeVolume") + "/" + self("newTotalEconomy") + "),0))*" + inp("worldDamp") + ")+"
+        + inp("worldValue") + "*((" + coef("trendBaseInfluence") + "+" + coef("trendTradeInfluence") + "*IF(" + self("newTotalEconomy") + ">0,MIN(1," + inp("tradeVolume") + "/" + self("newTotalEconomy") + "),0))*" + inp("worldDamp") + ")))";
     default:
       var m = /^newStock_(.+)$/.exec(field);
       if (m) {
